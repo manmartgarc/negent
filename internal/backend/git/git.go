@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/manmart/negent/internal/backend"
 )
@@ -73,12 +74,44 @@ func (g *Git) Push(ctx context.Context, msg string) error {
 }
 
 func (g *Git) Pull(ctx context.Context) error {
+	// Check if there are any commits in the remote; if not, skip pull.
+	if err := g.run(ctx, g.stagingDir, "rev-parse", "HEAD"); err != nil {
+		return nil // empty repo, nothing to pull
+	}
 	return g.run(ctx, g.stagingDir, "pull", "--rebase")
 }
 
 func (g *Git) Status(ctx context.Context) ([]backend.FileChange, error) {
-	// TODO: parse git status --porcelain for structured output
-	return nil, nil
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	cmd.Dir = g.stagingDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git status: %w", err)
+	}
+
+	var changes []backend.FileChange
+	for _, line := range strings.Split(string(out), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		status := line[:2]
+		path := strings.TrimSpace(line[3:])
+
+		var kind backend.ChangeKind
+		switch {
+		case strings.Contains(status, "D"):
+			kind = backend.ChangeDeleted
+		case strings.Contains(status, "?"):
+			kind = backend.ChangeAdded
+		case strings.Contains(status, "A"):
+			kind = backend.ChangeAdded
+		default:
+			kind = backend.ChangeModified
+		}
+		changes = append(changes, backend.FileChange{Path: path, Kind: kind})
+	}
+
+	return changes, nil
 }
 
 func (g *Git) StagingDir() string {
@@ -91,7 +124,9 @@ func (g *Git) run(ctx context.Context, dir string, args ...string) error {
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, out)
+	}
+	return nil
 }
