@@ -164,7 +164,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 }
 
 // defaultCategoriesFor returns the default sync categories for a known agent.
-func defaultCategoriesFor(name string) []string {
+func defaultCategoriesFor(_ string) []string {
 	// All known agents default to config + custom-code + memory
 	return []string{"config", "custom-code", "memory"}
 }

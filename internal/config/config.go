@@ -10,8 +10,9 @@ import (
 
 // AgentConfig holds per-agent sync configuration.
 type AgentConfig struct {
-	Source     string   `mapstructure:"source" yaml:"source"`
-	Sync       []string `mapstructure:"sync" yaml:"sync"`
+	Source string            `mapstructure:"source" yaml:"source"`
+	Sync   []string          `mapstructure:"sync" yaml:"sync"`
+	Links  map[string]string `mapstructure:"links,omitempty" yaml:"links,omitempty"` // remote project dir -> local path
 }
 
 // Config is the top-level negent configuration.

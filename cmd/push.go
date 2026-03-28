@@ -73,7 +73,7 @@ func buildAgents(cfg *config.Config) (map[string]agent.Agent, map[string][]agent
 	categories := make(map[string][]agent.Category)
 
 	for name, ac := range cfg.Agents {
-		ag, err := newAgent(name, ac.Source)
+		ag, err := newAgent(name, ac.Source, ac.Links)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -90,11 +90,11 @@ func buildAgents(cfg *config.Config) (map[string]agent.Agent, map[string][]agent
 }
 
 // newAgent creates an agent instance by name.
-func newAgent(name, sourceDir string) (agent.Agent, error) {
+func newAgent(name, sourceDir string, links map[string]string) (agent.Agent, error) {
 	expanded := agent.ExpandHome(sourceDir)
 	switch name {
 	case "claude":
-		return agentclaude.New(expanded), nil
+		return agentclaude.New(expanded, links), nil
 	default:
 		return nil, fmt.Errorf("unsupported agent: %s", name)
 	}

@@ -95,15 +95,21 @@ type SidecarMeta struct {
 // Claude implements agent.Agent for Claude Code.
 type Claude struct {
 	sourceDir string
+	links     map[string]string // remote project dir -> local absolute path (manual overrides)
 }
 
 // New creates a new Claude agent with the given source directory.
 // If sourceDir is empty, the default (~/.claude) is used.
-func New(sourceDir string) *Claude {
+// Links are optional manual project mappings from config.
+func New(sourceDir string, links ...map[string]string) *Claude {
 	if sourceDir == "" {
 		sourceDir = DefaultSourceDir()
 	}
-	return &Claude{sourceDir: sourceDir}
+	c := &Claude{sourceDir: sourceDir}
+	if len(links) > 0 && links[0] != nil {
+		c.links = links[0]
+	}
+	return c
 }
 
 func (c *Claude) Name() string {
@@ -329,7 +335,20 @@ func (c *Claude) matchProject(remoteDir string, meta SidecarMeta, localProjects 
 		}
 	}
 
-	// Tier 4: No match — stage for later
+	// Tier 4: Manual link from config
+	if c.links != nil {
+		if localPath, ok := c.links[remoteDir]; ok {
+			// Find or create the local encoded dir for this path
+			for localDir, lp := range localProjects {
+				if lp == localPath {
+					return localDir, true
+				}
+			}
+			// The linked path might not have a local project dir yet — skip for now
+		}
+	}
+
+	// Tier 5: No match — stage for later
 	return "", false
 }
 
@@ -386,8 +405,52 @@ func copyFileForPlace(src, dst string) error {
 }
 
 func (c *Claude) Diff(stagingDir string) ([]backend.FileChange, error) {
-	// TODO: implement in Phase 5
-	return nil, nil
+	var changes []backend.FileChange
+
+	// Walk local files and compare against staging
+	localFiles := make(map[string]bool)
+	err := filepath.WalkDir(c.sourceDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if c.isExcluded(path) {
+			return nil
+		}
+		relPath, _ := filepath.Rel(c.sourceDir, path)
+		localFiles[relPath] = true
+
+		stagedPath := filepath.Join(stagingDir, relPath)
+		if _, err := os.Stat(stagedPath); os.IsNotExist(err) {
+			changes = append(changes, backend.FileChange{Path: relPath, Kind: backend.ChangeAdded})
+		} else {
+			localData, err1 := os.ReadFile(path)
+			stagedData, err2 := os.ReadFile(stagedPath)
+			if err1 == nil && err2 == nil && string(localData) != string(stagedData) {
+				changes = append(changes, backend.FileChange{Path: relPath, Kind: backend.ChangeModified})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking local dir: %w", err)
+	}
+
+	// Walk staged files to find deletions (in staging but not local)
+	stagedDir := stagingDir
+	if _, err := os.Stat(stagedDir); err == nil {
+		filepath.WalkDir(stagedDir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			relPath, _ := filepath.Rel(stagedDir, path)
+			if !localFiles[relPath] {
+				changes = append(changes, backend.FileChange{Path: relPath, Kind: backend.ChangeDeleted})
+			}
+			return nil
+		})
+	}
+
+	return changes, nil
 }
 
 // isExcluded checks if a file path matches any exclude pattern.
@@ -471,10 +534,7 @@ func (c *Claude) generateSidecars() ([]agent.SyncFile, error) {
 // This is inherently ambiguous (dash is also a valid path char), but we
 // use best-effort decoding — the sidecar stores the real path anyway.
 func decodeProjectPath(encoded string) string {
-	// Strip leading dash
-	if strings.HasPrefix(encoded, "-") {
-		encoded = encoded[1:]
-	}
+	encoded = strings.TrimPrefix(encoded, "-")
 	// Replace dashes with path separator
 	return "/" + strings.ReplaceAll(encoded, "-", "/")
 }
