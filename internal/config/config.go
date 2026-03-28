@@ -1,0 +1,79 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/spf13/viper"
+)
+
+// AgentConfig holds per-agent sync configuration.
+type AgentConfig struct {
+	Source     string   `mapstructure:"source" yaml:"source"`
+	Sync       []string `mapstructure:"sync" yaml:"sync"`
+}
+
+// Config is the top-level negent configuration.
+type Config struct {
+	Backend string                 `mapstructure:"backend" yaml:"backend"`
+	Repo    string                 `mapstructure:"repo" yaml:"repo"`
+	Machine string                 `mapstructure:"machine" yaml:"machine"`
+	Agents  map[string]AgentConfig `mapstructure:"agents" yaml:"agents"`
+}
+
+// DefaultPath returns the default config file path (~/.config/negent/config.yaml).
+func DefaultPath() string {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return filepath.Join(dir, "negent", "config.yaml")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "negent", "config.yaml")
+}
+
+// Load reads the config from the given path.
+func Load(path string) (*Config, error) {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("yaml")
+
+	// Defaults
+	v.SetDefault("backend", "git")
+	v.SetDefault("agents", map[string]AgentConfig{})
+
+	if err := v.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("reading config: %w", err)
+	}
+
+	var cfg Config
+	if err := v.Unmarshal(&cfg); err != nil {
+		return nil, fmt.Errorf("unmarshaling config: %w", err)
+	}
+	return &cfg, nil
+}
+
+// Save writes the config to the given path, creating parent directories
+// as needed.
+func Save(cfg *Config, path string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("creating config dir: %w", err)
+	}
+
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("yaml")
+
+	v.Set("backend", cfg.Backend)
+	v.Set("repo", cfg.Repo)
+	v.Set("machine", cfg.Machine)
+	v.Set("agents", cfg.Agents)
+
+	return v.WriteConfig()
+}
+
+// Exists returns true if the config file exists at the given path.
+func Exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
