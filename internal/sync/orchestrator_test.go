@@ -504,6 +504,228 @@ func TestPullNoData(t *testing.T) {
 	}
 }
 
+func TestPullMergesAppendOnlyFiles(t *testing.T) {
+	be := newMockBackend(t)
+
+	// Pre-populate staging with an append-only file (history from another machine).
+	agentDir := filepath.Join(be.StagingDir(), "claude")
+	os.MkdirAll(agentDir, 0o755)
+	stagedContent := strings.Join([]string{
+		`{"timestamp":100,"sessionId":"sA","display":"A"}`,
+		`{"timestamp":200,"sessionId":"sB","display":"B"}`,
+		`{"timestamp":300,"sessionId":"sC","display":"C"}`,
+		"",
+	}, "\n")
+	os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte(stagedContent), 0o644)
+
+	// Local history has overlapping lines (B,C) plus a local-only line (D).
+	ag := newMockAgent(t, "claude", nil)
+	localContent := strings.Join([]string{
+		`{"timestamp":200,"sessionId":"sB","display":"B"}`,
+		`{"timestamp":300,"sessionId":"sC","display":"C"}`,
+		`{"timestamp":400,"sessionId":"sD","display":"D"}`,
+		"",
+	}, "\n")
+	os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(localContent), 0o644)
+
+	agents := map[string]agent.Agent{"claude": ag}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
+
+	orch := NewOrchestrator(be, agents)
+	if err := orch.Pull(context.Background(), syncTypes); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+
+	// Append-only files should NOT be passed to Place (they are merged directly).
+	for _, f := range ag.placedFiles {
+		if f.StagingPath == "history.jsonl" {
+			t.Error("history.jsonl should not be placed via Place(); it should be merged directly")
+		}
+	}
+
+	// Verify merged result: staged lines + local-only lines.
+	merged, err := os.ReadFile(filepath.Join(ag.SourceDir(), "history.jsonl"))
+	if err != nil {
+		t.Fatalf("reading merged file: %v", err)
+	}
+
+	entries, err := readHistoryFile(filepath.Join(ag.SourceDir(), "history.jsonl"))
+	if err != nil {
+		t.Fatalf("readHistoryFile: %v", err)
+	}
+	if len(entries) != 4 {
+		t.Fatalf("got %d entries, want 4:\n%s", len(entries), string(merged))
+	}
+	if entries[0].Timestamp != 100 || entries[1].Timestamp != 200 || entries[2].Timestamp != 300 || entries[3].Timestamp != 400 {
+		t.Fatalf("entries not sorted/merged as expected: %+v", entries)
+	}
+}
+
+func TestPullCanonicalizesHistoryJSONL(t *testing.T) {
+	be := newMockBackend(t)
+
+	agentDir := filepath.Join(be.StagingDir(), "claude")
+	os.MkdirAll(agentDir, 0o755)
+	stagedContent := strings.Join([]string{
+		"<<<<<<< HEAD",
+		`{"timestamp":200,"sessionId":"s2","display":"b"}`,
+		"=======",
+		`{"timestamp":100,"sessionId":"s1","display":"a"}`,
+		">>>>>>> branch",
+		"",
+	}, "\n")
+	os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte(stagedContent), 0o644)
+
+	ag := newMockAgent(t, "claude", nil)
+	localContent := `{"timestamp":300,"sessionId":"s3","display":"c"}` + "\n"
+	os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(localContent), 0o644)
+
+	agents := map[string]agent.Agent{"claude": ag}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
+
+	orch := NewOrchestrator(be, agents)
+	if err := orch.Pull(context.Background(), syncTypes); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+
+	mergedPath := filepath.Join(ag.SourceDir(), "history.jsonl")
+	merged, err := os.ReadFile(mergedPath)
+	if err != nil {
+		t.Fatalf("reading merged file: %v", err)
+	}
+	if strings.Contains(string(merged), "<<<<<<<") || strings.Contains(string(merged), "=======") || strings.Contains(string(merged), ">>>>>>>") {
+		t.Fatalf("merged history should not contain conflict markers:\n%s", string(merged))
+	}
+
+	entries, err := readHistoryFile(mergedPath)
+	if err != nil {
+		t.Fatalf("readHistoryFile: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("entries = %d, want 3", len(entries))
+	}
+	if entries[0].Timestamp != 100 || entries[1].Timestamp != 200 || entries[2].Timestamp != 300 {
+		t.Fatalf("entries not sorted by timestamp: %+v", entries)
+	}
+}
+
+func TestPushCanonicalizesLocalAndStagingHistoryJSONL(t *testing.T) {
+	be := newMockBackend(t)
+
+	ag := newMockAgent(t, "claude", []agent.SyncFile{
+		{RelPath: "history.jsonl", StagingPath: "history.jsonl", Type: mockTypeSessions},
+	})
+	localContent := strings.Join([]string{
+		"<<<<<<< HEAD",
+		`{"timestamp":300,"sessionId":"s3","display":"c"}`,
+		"=======",
+		`{"timestamp":100,"sessionId":"s1","display":"a"}`,
+		">>>>>>> branch",
+		`{"timestamp":200,"sessionId":"s2","display":"b"}`,
+		"",
+	}, "\n")
+	os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(localContent), 0o644)
+
+	agents := map[string]agent.Agent{"claude": ag}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
+
+	orch := NewOrchestrator(be, agents)
+	if err := orch.Push(context.Background(), syncTypes); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	localMerged, err := os.ReadFile(filepath.Join(ag.SourceDir(), "history.jsonl"))
+	if err != nil {
+		t.Fatalf("reading local merged history: %v", err)
+	}
+	stagedMerged, err := os.ReadFile(filepath.Join(be.StagingDir(), "claude", "history.jsonl"))
+	if err != nil {
+		t.Fatalf("reading staged merged history: %v", err)
+	}
+
+	if string(localMerged) != string(stagedMerged) {
+		t.Fatalf("local and staged history should match after push canonicalization")
+	}
+	if strings.Contains(string(localMerged), "<<<<<<<") || strings.Contains(string(localMerged), "=======") || strings.Contains(string(localMerged), ">>>>>>>") {
+		t.Fatalf("canonicalized history should not contain conflict markers:\n%s", string(localMerged))
+	}
+
+	entries, err := readHistoryFile(filepath.Join(ag.SourceDir(), "history.jsonl"))
+	if err != nil {
+		t.Fatalf("readHistoryFile: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("entries = %d, want 3", len(entries))
+	}
+	if entries[0].Timestamp != 100 || entries[1].Timestamp != 200 || entries[2].Timestamp != 300 {
+		t.Fatalf("entries not sorted: %+v", entries)
+	}
+}
+
+func TestPullAppendOnlyNeverConflicts(t *testing.T) {
+	be := newMockBackend(t)
+
+	// Staging has base content for the append-only file.
+	agentDir := filepath.Join(be.StagingDir(), "claude")
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte(`{"timestamp":100,"sessionId":"sA","display":"A"}`+"\n"), 0o644)
+
+	// Local has completely different content — would be a conflict for replace mode.
+	ag := newMockAgent(t, "claude", nil)
+	os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(`{"timestamp":200,"sessionId":"sZ","display":"Z"}`+"\n"), 0o644)
+
+	agents := map[string]agent.Agent{"claude": ag}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
+
+	orch := NewOrchestrator(be, agents)
+	if err := orch.Pull(context.Background(), syncTypes); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+
+	// Verify it was merged, not skipped as a conflict.
+	merged, err := os.ReadFile(filepath.Join(ag.SourceDir(), "history.jsonl"))
+	if err != nil {
+		t.Fatalf("reading merged file: %v", err)
+	}
+
+	content := string(merged)
+	if !strings.Contains(content, `"sessionId":"sA"`) {
+		t.Error("merged file should contain remote session sA")
+	}
+	if !strings.Contains(content, `"sessionId":"sZ"`) {
+		t.Error("merged file should contain local session sZ")
+	}
+}
+
+func TestPlanAppendOnlyNeverConflicts(t *testing.T) {
+	be := newMockBackend(t)
+	be.fetchedFiles = []backend.FileChange{
+		{Path: "claude/history.jsonl", Kind: backend.ChangeModified},
+	}
+
+	// Staging has base content.
+	agentDir := filepath.Join(be.StagingDir(), "claude")
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte("line-A\n"), 0o644)
+
+	// Local has different content — would be conflict for replace mode.
+	ag := newMockAgent(t, "claude", nil)
+	os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte("line-Z\n"), 0o644)
+
+	orch := NewOrchestrator(be, map[string]agent.Agent{"claude": ag})
+	plan, err := orch.Plan(context.Background(), map[string][]agent.SyncType{"claude": {mockTypeSessions}})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+
+	if len(plan.Remote) != 1 {
+		t.Fatalf("remote changes = %d, want 1", len(plan.Remote))
+	}
+	if plan.Remote[0].Action != ActionDownload {
+		t.Errorf("history.jsonl action = %q, want %q (append-only files should never conflict)", plan.Remote[0].Action, ActionDownload)
+	}
+}
+
 func TestPushDeleteCleansEmptyDirs(t *testing.T) {
 	be := newMockBackend(t)
 

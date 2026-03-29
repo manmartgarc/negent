@@ -97,6 +97,7 @@ func (o *Orchestrator) Plan(ctx context.Context, syncTypes map[string][]agent.Sy
 		}
 
 		typeSet := agent.SyncTypeSet(types)
+		specMap := agent.SyncTypeMap(ag)
 		for _, ch := range remoteByAgent[name] {
 			_, relPath, _ := splitAgentPath(ch.Path)
 			syncType := ag.SyncTypeForPath(relPath)
@@ -108,6 +109,16 @@ func (o *Orchestrator) Plan(ctx context.Context, syncTypes map[string][]agent.Sy
 			}
 
 			if strings.HasPrefix(relPath, "projects/") {
+				plan.Remote = append(plan.Remote, PlannedChange{
+					Agent:  name,
+					Path:   relPath,
+					Action: ActionDownload,
+				})
+				continue
+			}
+
+			// Append-only files are always merged, never conflicted.
+			if agent.LookupMode(specMap, syncType) == agent.SyncModeAppendOnly {
 				plan.Remote = append(plan.Remote, PlannedChange{
 					Agent:  name,
 					Path:   relPath,
@@ -304,13 +315,23 @@ func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.Sy
 		}
 
 		agentBase := base[name]
+		specMap := agent.SyncTypeMap(ag)
 		var safeFiles []agent.SyncFile
+		var appendOnlyFiles []agent.SyncFile
 		var conflicts []string
 
 		for _, f := range files {
 			// Project files: pass through to Place() for path-encoded matching.
 			if strings.HasPrefix(f.StagingPath, "projects/") {
 				safeFiles = append(safeFiles, f)
+				continue
+			}
+
+			syncType := ag.SyncTypeForPath(f.RelPath)
+
+			// Append-only files are always merged, never conflicted.
+			if agent.LookupMode(specMap, syncType) == agent.SyncModeAppendOnly {
+				appendOnlyFiles = append(appendOnlyFiles, f)
 				continue
 			}
 
@@ -338,6 +359,15 @@ func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.Sy
 			}
 		}
 
+		// Merge append-only files from staging into local.
+		for _, f := range appendOnlyFiles {
+			src := filepath.Join(agentDir, f.StagingPath)
+			dst := filepath.Join(ag.SourceDir(), f.RelPath)
+			if err := mergeAppendOnly(src, dst); err != nil {
+				return fmt.Errorf("merging append-only %s: %w", f.RelPath, err)
+			}
+		}
+
 		if len(conflicts) > 0 {
 			fmt.Printf("  %s: %d conflict(s) — keeping local version:\n", name, len(conflicts))
 			for _, c := range conflicts {
@@ -350,7 +380,7 @@ func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.Sy
 			return fmt.Errorf("placing files for %s: %w", name, err)
 		}
 
-		fmt.Printf("  %s: %d placed, %d skipped", name, result.Placed, result.Skipped)
+		fmt.Printf("  %s: %d placed, %d merged, %d skipped", name, result.Placed, len(appendOnlyFiles), result.Skipped)
 		if len(result.Unmatched) > 0 {
 			fmt.Printf(", %d unmatched", len(result.Unmatched))
 		}
@@ -376,7 +406,20 @@ func mergeAppendOnly(src, dst string) error {
 	dstData, _ := os.ReadFile(dst) // ignore error: dst may not exist yet
 
 	if len(dstData) == 0 {
+		if filepath.Base(dst) == "history.jsonl" || filepath.Base(src) == "history.jsonl" {
+			if err := MergeHistoryFiles(dst, src); err != nil {
+				return err
+			}
+			return syncAppendOnlyPair(src, dst)
+		}
 		return os.WriteFile(dst, srcData, 0o644)
+	}
+
+	if filepath.Base(dst) == "history.jsonl" || filepath.Base(src) == "history.jsonl" {
+		if err := MergeHistoryFiles(dst, dst, src); err != nil {
+			return err
+		}
+		return syncAppendOnlyPair(src, dst)
 	}
 
 	dstLines := strings.Split(strings.TrimRight(string(dstData), "\n"), "\n")
@@ -405,6 +448,17 @@ func mergeAppendOnly(src, dst string) error {
 
 	_, err = f.WriteString(strings.Join(newLines, "\n") + "\n")
 	return err
+}
+
+func syncAppendOnlyPair(src, dst string) error {
+	merged, err := os.ReadFile(dst)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(src, merged, 0o644); err != nil {
+		return err
+	}
+	return nil
 }
 
 // copyFile copies a file from src to dst, creating parent directories as needed.

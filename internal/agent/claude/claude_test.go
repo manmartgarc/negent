@@ -826,3 +826,56 @@ func TestDiffSidecarOnlyNoPhantomChanges(t *testing.T) {
 		}
 	}
 }
+
+func TestDiffAppendOnlySupersetIsClean(t *testing.T) {
+	localDir := t.TempDir()
+	stagingDir := t.TempDir()
+	c := New(localDir)
+
+	writeFile(t, filepath.Join(localDir, "history.jsonl"), "line-A\nline-B\n")
+	writeFile(t, filepath.Join(stagingDir, "history.jsonl"), "line-B\nline-A\nline-C\n")
+
+	changes, err := c.Diff(stagingDir, []agent.SyncType{SyncTypeHistory})
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("expected no changes, got %v", changes)
+	}
+}
+
+func TestDiffAppendOnlyLocalOnlyLinesArePending(t *testing.T) {
+	localDir := t.TempDir()
+	stagingDir := t.TempDir()
+	c := New(localDir)
+
+	writeFile(t, filepath.Join(localDir, "history.jsonl"), "line-A\nline-B\nline-LOCAL\n")
+	writeFile(t, filepath.Join(stagingDir, "history.jsonl"), "line-A\nline-B\n")
+
+	changes, err := c.Diff(stagingDir, []agent.SyncType{SyncTypeHistory})
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d: %v", len(changes), changes)
+	}
+	if changes[0].Path != "history.jsonl" || changes[0].Kind != backend.ChangeModified {
+		t.Fatalf("unexpected change: %+v", changes[0])
+	}
+}
+
+func TestDiffAppendOnlyStagedOnlyIsNotDeletion(t *testing.T) {
+	localDir := t.TempDir()
+	stagingDir := t.TempDir()
+	c := New(localDir)
+
+	writeFile(t, filepath.Join(stagingDir, "history.jsonl"), "line-A\n")
+
+	changes, err := c.Diff(stagingDir, []agent.SyncType{SyncTypeHistory})
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("expected no changes, got %v", changes)
+	}
+}

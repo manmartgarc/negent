@@ -55,7 +55,7 @@ var syncTypeSpecs = []agent.SyncTypeSpec{
 	{ID: SyncTypeAgentMemory, Label: "Agent memory", Description: "Persistent subagent memory in agent-memory/.", Group: "memory", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
 	{ID: SyncTypeAutoMemory, Label: "Auto memory", Description: "Project auto-memory in projects/*/memory/.", Group: "memory", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
 	{ID: SyncTypeSessions, Label: "Sessions", Description: "Project session JSONL logs.", Group: "history", Default: false, Mode: agent.SyncModeAppendOnly, Reference: "https://code.claude.com/docs/en/claude-directory"},
-	{ID: SyncTypeHistory, Label: "History", Description: "Global history.jsonl.", Group: "history", Default: false, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypeHistory, Label: "History", Description: "Global history.jsonl.", Group: "history", Default: false, Mode: agent.SyncModeAppendOnly, Reference: "https://code.claude.com/docs/en/claude-directory"},
 	{ID: SyncTypeKeybindings, Label: "Keybindings", Description: "Global keybindings.json.", Group: "config", Default: false, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
 }
 
@@ -642,6 +642,7 @@ func (c *Claude) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backend.
 
 	var changes []backend.FileChange
 	localPaths := make(map[string]bool, len(files))
+	specMap := agent.SyncTypeMap(c)
 
 	for _, f := range files {
 		mapped := remapStagingPath(f.StagingPath, mapping)
@@ -654,6 +655,12 @@ func (c *Claude) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backend.
 		stagedData, err := os.ReadFile(stagedPath)
 		if os.IsNotExist(err) {
 			changes = append(changes, backend.FileChange{Path: mapped, Kind: backend.ChangeAdded})
+		} else if err == nil && agent.LookupMode(specMap, f.Type) == agent.SyncModeAppendOnly {
+			// Append-only files should only be considered pending when local has
+			// entries missing from staged content.
+			if appendOnlyNeedsSync(localData, stagedData) {
+				changes = append(changes, backend.FileChange{Path: mapped, Kind: backend.ChangeModified})
+			}
 		} else if err == nil && string(localData) != string(stagedData) {
 			changes = append(changes, backend.FileChange{Path: mapped, Kind: backend.ChangeModified})
 		}
@@ -673,7 +680,11 @@ func (c *Claude) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backend.
 				return nil
 			}
 			// Only report deletions for files that belong to an enabled sync type.
-			if syncType := syncTypeForPath(relPath); syncType != "" && !typeSet[syncType] {
+			syncType := syncTypeForPath(relPath)
+			if syncType != "" && !typeSet[syncType] {
+				return nil
+			}
+			if agent.LookupMode(specMap, syncType) == agent.SyncModeAppendOnly {
 				return nil
 			}
 			// Skip project files that don't belong to this machine:
@@ -697,6 +708,25 @@ func (c *Claude) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backend.
 	}
 
 	return changes, nil
+}
+
+func appendOnlyNeedsSync(localData, stagedData []byte) bool {
+	existing := make(map[string]struct{})
+	for _, line := range strings.Split(strings.TrimRight(string(stagedData), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		existing[line] = struct{}{}
+	}
+	for _, line := range strings.Split(strings.TrimRight(string(localData), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		if _, ok := existing[line]; !ok {
+			return true
+		}
+	}
+	return false
 }
 
 // isExcluded checks if a file path matches any exclude pattern.

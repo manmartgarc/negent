@@ -101,7 +101,15 @@ func (g *Git) Push(ctx context.Context, msg string) error {
 	if err := g.run(ctx, g.stagingDir, "commit", "-m", msg); err != nil {
 		return err
 	}
-	return g.run(ctx, g.stagingDir, "push")
+
+	// If push fails (e.g., remote has new commits), pull --rebase and retry.
+	if err := g.run(ctx, g.stagingDir, "push"); err != nil {
+		if pullErr := g.Pull(ctx); pullErr != nil {
+			return fmt.Errorf("push rejected and pull failed: %w", pullErr)
+		}
+		return g.run(ctx, g.stagingDir, "push")
+	}
+	return nil
 }
 
 func (g *Git) Fetch(ctx context.Context) error {
@@ -152,7 +160,23 @@ func (g *Git) Pull(ctx context.Context) error {
 	if err := g.run(ctx, g.stagingDir, "rev-parse", "HEAD"); err != nil {
 		return nil // empty repo, nothing to pull
 	}
-	return g.run(ctx, g.stagingDir, "pull", "--rebase")
+	// If a previous rebase was interrupted (e.g. crash, signal), complete or
+	// abort it before attempting a new pull.
+	rebaseMerge := filepath.Join(g.stagingDir, ".git", "rebase-merge")
+	rebaseApply := filepath.Join(g.stagingDir, ".git", "rebase-apply")
+	_, mergeInProgress := os.Stat(rebaseMerge)
+	_, applyInProgress := os.Stat(rebaseApply)
+	if mergeInProgress == nil || applyInProgress == nil {
+		// Try to continue first; if that fails, abort so we're on a clean branch.
+		if err := g.run(ctx, g.stagingDir, "rebase", "--continue"); err != nil {
+			_ = g.run(ctx, g.stagingDir, "rebase", "--abort")
+		}
+	}
+	// Use -X theirs so that rebase conflicts are resolved in favor of the
+	// remote. The staging dir is a cache of remote state — the orchestrator
+	// handles real conflict detection between staging and the user's local
+	// source directories.
+	return g.run(ctx, g.stagingDir, "pull", "--rebase", "-X", "theirs")
 }
 
 func (g *Git) Status(ctx context.Context) ([]backend.FileChange, error) {

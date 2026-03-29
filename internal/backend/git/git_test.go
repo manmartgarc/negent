@@ -128,7 +128,7 @@ func TestInitPullsIfAlreadyCloned(t *testing.T) {
 		t.Fatalf("expected 2 calls, got %d: %v", len(fr.calls), fr.calls)
 	}
 	assertCall(t, fr.calls[0], staging, "rev-parse", "HEAD")
-	assertCall(t, fr.calls[1], staging, "pull", "--rebase")
+	assertCall(t, fr.calls[1], staging, "pull", "--rebase", "-X", "theirs")
 }
 
 func TestPushSendsCommitAndPush(t *testing.T) {
@@ -151,6 +151,31 @@ func TestPushSendsCommitAndPush(t *testing.T) {
 	assertCall(t, fr.calls[1], "/staging", "diff", "--cached", "--quiet")
 	assertCall(t, fr.calls[2], "/staging", "commit", "-m", "test commit")
 	assertCall(t, fr.calls[3], "/staging", "push")
+}
+
+func TestPushRetriesAfterPull(t *testing.T) {
+	fr := &fakeRunner{responses: []fakeResp{
+		okResp(""),          // add -A
+		errResp("has diff"), // diff --cached --quiet
+		okResp(""),          // commit -m
+		errResp("rejected"), // push (fails — remote diverged)
+		okResp("abc123\n"),  // rev-parse HEAD (inside Pull)
+		okResp(""),          // pull --rebase -X theirs
+		okResp(""),          // push (retry)
+	}}
+	g := &Git{stagingDir: "/staging", runner: fr.run}
+
+	if err := g.Push(context.Background(), "test commit"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	if len(fr.calls) != 7 {
+		t.Fatalf("expected 7 calls, got %d: %v", len(fr.calls), fr.calls)
+	}
+	assertCall(t, fr.calls[3], "/staging", "push")
+	assertCall(t, fr.calls[4], "/staging", "rev-parse", "HEAD")
+	assertCall(t, fr.calls[5], "/staging", "pull", "--rebase", "-X", "theirs")
+	assertCall(t, fr.calls[6], "/staging", "push")
 }
 
 func TestPushSkipsCommitWhenNothingStaged(t *testing.T) {
@@ -184,7 +209,7 @@ func TestPullSendsRebaseCommand(t *testing.T) {
 		t.Fatalf("expected 2 calls, got %d", len(fr.calls))
 	}
 	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
-	assertCall(t, fr.calls[1], "/staging", "pull", "--rebase")
+	assertCall(t, fr.calls[1], "/staging", "pull", "--rebase", "-X", "theirs")
 }
 
 func TestPullSkipsEmptyRepo(t *testing.T) {
@@ -201,6 +226,58 @@ func TestPullSkipsEmptyRepo(t *testing.T) {
 		t.Fatalf("expected 1 call (rev-parse only), got %d", len(fr.calls))
 	}
 	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
+}
+
+func TestPullContinuesInterruptedRebase(t *testing.T) {
+	staging := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(staging, ".git", "rebase-merge"), 0o755); err != nil {
+		t.Fatalf("mkdir rebase-merge: %v", err)
+	}
+
+	fr := &fakeRunner{responses: []fakeResp{
+		okResp("abc123\n"), // rev-parse HEAD
+		okResp(""),         // rebase --continue
+		okResp(""),         // pull --rebase -X theirs
+	}}
+	g := &Git{stagingDir: staging, runner: fr.run}
+
+	if err := g.Pull(context.Background()); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+
+	if len(fr.calls) != 3 {
+		t.Fatalf("expected 3 calls, got %d: %v", len(fr.calls), fr.calls)
+	}
+	assertCall(t, fr.calls[0], staging, "rev-parse", "HEAD")
+	assertCall(t, fr.calls[1], staging, "rebase", "--continue")
+	assertCall(t, fr.calls[2], staging, "pull", "--rebase", "-X", "theirs")
+}
+
+func TestPullAbortsInterruptedRebaseWhenContinueFails(t *testing.T) {
+	staging := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(staging, ".git", "rebase-apply"), 0o755); err != nil {
+		t.Fatalf("mkdir rebase-apply: %v", err)
+	}
+
+	fr := &fakeRunner{responses: []fakeResp{
+		okResp("abc123\n"),   // rev-parse HEAD
+		errResp("continue"),  // rebase --continue
+		okResp(""),           // rebase --abort
+		okResp(""),           // pull --rebase -X theirs
+	}}
+	g := &Git{stagingDir: staging, runner: fr.run}
+
+	if err := g.Pull(context.Background()); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+
+	if len(fr.calls) != 4 {
+		t.Fatalf("expected 4 calls, got %d: %v", len(fr.calls), fr.calls)
+	}
+	assertCall(t, fr.calls[0], staging, "rev-parse", "HEAD")
+	assertCall(t, fr.calls[1], staging, "rebase", "--continue")
+	assertCall(t, fr.calls[2], staging, "rebase", "--abort")
+	assertCall(t, fr.calls[3], staging, "pull", "--rebase", "-X", "theirs")
 }
 
 func TestFetchSendsFetchOrigin(t *testing.T) {
