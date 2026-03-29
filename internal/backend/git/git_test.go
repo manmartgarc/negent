@@ -176,6 +176,117 @@ func TestStatusDetectsChanges(t *testing.T) {
 	}
 }
 
+func TestFetchEmptyRemote(t *testing.T) {
+	remote := initBareRepo(t)
+	staging := filepath.Join(t.TempDir(), "staging")
+
+	g := New(remote, staging)
+	ctx := context.Background()
+	if err := g.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Fetch on an empty repo should succeed without error.
+	if err := g.Fetch(ctx); err != nil {
+		t.Fatalf("Fetch on empty repo: %v", err)
+	}
+}
+
+func TestFetchedFilesNoneBeforeFetch(t *testing.T) {
+	remote := initBareRepo(t)
+	staging := filepath.Join(t.TempDir(), "staging")
+
+	g := New(remote, staging)
+	ctx := context.Background()
+	if err := g.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// No fetch done → no FETCH_HEAD → empty result.
+	files, err := g.FetchedFiles(ctx)
+	if err != nil {
+		t.Fatalf("FetchedFiles: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 fetched files before fetch, got %d: %v", len(files), files)
+	}
+}
+
+func TestFetchedFilesDetectsChanges(t *testing.T) {
+	remote := initBareRepo(t)
+	staging1 := filepath.Join(t.TempDir(), "staging1")
+	staging2 := filepath.Join(t.TempDir(), "staging2")
+	ctx := context.Background()
+
+	// Machine A: clone and push two files.
+	g1 := New(remote, staging1)
+	if err := g1.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
+		t.Fatalf("Init g1: %v", err)
+	}
+	os.WriteFile(filepath.Join(staging1, "changed.txt"), []byte("v1"), 0o644)
+	os.WriteFile(filepath.Join(staging1, "unchanged.txt"), []byte("same"), 0o644)
+	if err := g1.Push(ctx, "initial"); err != nil {
+		t.Fatalf("Push g1 initial: %v", err)
+	}
+
+	// Machine B: clone.
+	g2 := New(remote, staging2)
+	if err := g2.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
+		t.Fatalf("Init g2: %v", err)
+	}
+
+	// Machine A: update only changed.txt and push.
+	os.WriteFile(filepath.Join(staging1, "changed.txt"), []byte("v2"), 0o644)
+	if err := g1.Push(ctx, "update changed.txt"); err != nil {
+		t.Fatalf("Push g1 update: %v", err)
+	}
+
+	// Machine B: fetch (not pull) — working tree still at v1.
+	if err := g2.Fetch(ctx); err != nil {
+		t.Fatalf("Fetch g2: %v", err)
+	}
+
+	files, err := g2.FetchedFiles(ctx)
+	if err != nil {
+		t.Fatalf("FetchedFiles: %v", err)
+	}
+
+	if len(files) != 1 {
+		t.Fatalf("expected 1 fetched file, got %d: %v", len(files), files)
+	}
+	if files[0] != "changed.txt" {
+		t.Errorf("fetched file = %q, want %q", files[0], "changed.txt")
+	}
+}
+
+func TestFetchedFilesEmptyAfterUpToDate(t *testing.T) {
+	remote := initBareRepo(t)
+	staging := filepath.Join(t.TempDir(), "staging")
+
+	g := New(remote, staging)
+	ctx := context.Background()
+	if err := g.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	os.WriteFile(filepath.Join(staging, "file.txt"), []byte("hello"), 0o644)
+	if err := g.Push(ctx, "initial"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	// Fetch when already up to date → no fetched files.
+	if err := g.Fetch(ctx); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	files, err := g.FetchedFiles(ctx)
+	if err != nil {
+		t.Fatalf("FetchedFiles: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 fetched files when up to date, got %d: %v", len(files), files)
+	}
+}
+
 func TestDefaultStagingDir(t *testing.T) {
 	dir := DefaultStagingDir()
 	if dir == "" {

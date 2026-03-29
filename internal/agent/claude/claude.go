@@ -161,7 +161,7 @@ func (c *Claude) Collect(categories []agent.Category) ([]agent.SyncFile, error) 
 				relPath, _ := filepath.Rel(c.sourceDir, absPath)
 				files = append(files, agent.SyncFile{
 					RelPath:     relPath,
-					StagingPath: relPath,
+					StagingPath: filepath.ToSlash(relPath),
 					Category:    cat,
 				})
 			}
@@ -221,13 +221,18 @@ func (c *Claude) globFiles(pattern string) ([]string, error) {
 func (c *Claude) Place(stagingDir string, files []agent.SyncFile) (*agent.PlaceResult, error) {
 	result := &agent.PlaceResult{}
 
+	// Normalize RelPath separators for cross-platform consistency (git always uses /).
+	for i := range files {
+		files[i].RelPath = filepath.ToSlash(files[i].RelPath)
+	}
+
 	// Separate files into project files and non-project files
 	var nonProjectFiles []agent.SyncFile
 	projectFiles := make(map[string][]agent.SyncFile) // encoded dir name -> files
 	sidecarFiles := make(map[string]SidecarMeta)       // encoded dir name -> metadata
 
 	for _, f := range files {
-		parts := strings.SplitN(f.RelPath, string(filepath.Separator), 3)
+		parts := strings.SplitN(f.RelPath, "/", 3)
 		if len(parts) >= 2 && parts[0] == "projects" {
 			encodedDir := parts[1]
 
@@ -278,7 +283,7 @@ func (c *Claude) Place(stagingDir string, files []agent.SyncFile) (*agent.PlaceR
 
 		for _, f := range pFiles {
 			// Rewrite the path from remote project dir to local project dir
-			parts := strings.SplitN(f.RelPath, string(filepath.Separator), 3)
+			parts := strings.SplitN(f.RelPath, "/", 3)
 			var localRelPath string
 			if len(parts) == 3 {
 				localRelPath = filepath.Join("projects", localDir, parts[2])
@@ -404,46 +409,39 @@ func copyFileForPlace(src, dst string) error {
 	return os.WriteFile(dst, data, 0o644)
 }
 
-func (c *Claude) Diff(stagingDir string) ([]backend.FileChange, error) {
-	var changes []backend.FileChange
-
-	// Walk local files and compare against staging
-	localFiles := make(map[string]bool)
-	err := filepath.WalkDir(c.sourceDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		if c.isExcluded(path) {
-			return nil
-		}
-		relPath, _ := filepath.Rel(c.sourceDir, path)
-		localFiles[relPath] = true
-
-		stagedPath := filepath.Join(stagingDir, relPath)
-		if _, err := os.Stat(stagedPath); os.IsNotExist(err) {
-			changes = append(changes, backend.FileChange{Path: relPath, Kind: backend.ChangeAdded})
-		} else {
-			localData, err1 := os.ReadFile(path)
-			stagedData, err2 := os.ReadFile(stagedPath)
-			if err1 == nil && err2 == nil && string(localData) != string(stagedData) {
-				changes = append(changes, backend.FileChange{Path: relPath, Kind: backend.ChangeModified})
-			}
-		}
-		return nil
-	})
+func (c *Claude) Diff(stagingDir string, categories []agent.Category) ([]backend.FileChange, error) {
+	files, err := c.Collect(categories)
 	if err != nil {
-		return nil, fmt.Errorf("walking local dir: %w", err)
+		return nil, fmt.Errorf("collecting files: %w", err)
 	}
 
-	// Walk staged files to find deletions (in staging but not local)
-	stagedDir := stagingDir
-	if _, err := os.Stat(stagedDir); err == nil {
-		filepath.WalkDir(stagedDir, func(path string, d os.DirEntry, err error) error {
+	var changes []backend.FileChange
+	localPaths := make(map[string]bool, len(files))
+
+	for _, f := range files {
+		localPaths[f.StagingPath] = true
+		localData, err := os.ReadFile(filepath.Join(c.sourceDir, f.RelPath))
+		if err != nil {
+			continue
+		}
+		stagedPath := filepath.Join(stagingDir, f.StagingPath)
+		stagedData, err := os.ReadFile(stagedPath)
+		if os.IsNotExist(err) {
+			changes = append(changes, backend.FileChange{Path: f.StagingPath, Kind: backend.ChangeAdded})
+		} else if err == nil && string(localData) != string(stagedData) {
+			changes = append(changes, backend.FileChange{Path: f.StagingPath, Kind: backend.ChangeModified})
+		}
+	}
+
+	// Find staged files not present locally (deletions)
+	if _, err := os.Stat(stagingDir); err == nil {
+		filepath.WalkDir(stagingDir, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
 			}
-			relPath, _ := filepath.Rel(stagedDir, path)
-			if !localFiles[relPath] {
+			relPath, _ := filepath.Rel(stagingDir, path)
+			relPath = filepath.ToSlash(relPath)
+			if !localPaths[relPath] {
 				changes = append(changes, backend.FileChange{Path: relPath, Kind: backend.ChangeDeleted})
 			}
 			return nil
@@ -521,7 +519,7 @@ func (c *Claude) generateSidecars() ([]agent.SyncFile, error) {
 		relPath := filepath.Join("projects", dirName+".meta.json")
 		files = append(files, agent.SyncFile{
 			RelPath:     relPath,
-			StagingPath: relPath,
+			StagingPath: "projects/" + dirName + ".meta.json",
 			Category:    agent.CategoryMemory,
 		})
 	}
@@ -535,7 +533,12 @@ func (c *Claude) generateSidecars() ([]agent.SyncFile, error) {
 // use best-effort decoding — the sidecar stores the real path anyway.
 func decodeProjectPath(encoded string) string {
 	encoded = strings.TrimPrefix(encoded, "-")
-	// Replace dashes with path separator
+	if runtime.GOOS == "windows" && len(encoded) >= 2 && encoded[1] == '-' &&
+		encoded[0] >= 'A' && encoded[0] <= 'Z' {
+		// Windows-encoded path: "C-Users-foo" -> "C:\Users\foo"
+		rest := strings.ReplaceAll(encoded[2:], "-", `\`)
+		return string(encoded[0]) + `:\` + rest
+	}
 	return "/" + strings.ReplaceAll(encoded, "-", "/")
 }
 

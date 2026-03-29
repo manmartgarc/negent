@@ -27,10 +27,19 @@ type Backend interface {
 	// Init sets up the backend (e.g., clone repo, create bucket, verify SSH access).
 	Init(ctx context.Context, cfg BackendConfig) error
 
+	// Fetch downloads the latest remote state without updating the working tree.
+	// This allows conflict detection before merging remote changes locally.
+	Fetch(ctx context.Context) error
+
+	// FetchedFiles returns staging-relative paths of files that differ between
+	// the current HEAD and the most recent fetch. Returns nil if nothing was fetched
+	// or the remote has no new changes.
+	FetchedFiles(ctx context.Context) ([]string, error)
+
 	// Push writes the local staging directory to the remote.
 	Push(ctx context.Context, msg string) error
 
-	// Pull fetches the latest remote state into the local staging directory.
+	// Pull integrates previously fetched remote changes into the working tree.
 	Pull(ctx context.Context) error
 
 	// Status returns the diff between local staging and remote.

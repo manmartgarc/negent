@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/manmart/negent/internal/backend"
@@ -29,9 +30,22 @@ func New(remote, stagingDir string) *Git {
 }
 
 // DefaultStagingDir returns the default location for the git working copy.
+// On Linux: $XDG_DATA_HOME/negent/repo or ~/.local/share/negent/repo
+// On Windows: %LOCALAPPDATA%\negent\repo
+// On macOS: ~/Library/Application Support/negent/repo
 func DefaultStagingDir() string {
 	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
 		return filepath.Join(dir, "negent", "repo")
+	}
+	switch runtime.GOOS {
+	case "windows":
+		if dir := os.Getenv("LOCALAPPDATA"); dir != "" {
+			return filepath.Join(dir, "negent", "repo")
+		}
+	case "darwin":
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, "Library", "Application Support", "negent", "repo")
+		}
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "share", "negent", "repo")
@@ -71,6 +85,36 @@ func (g *Git) Push(ctx context.Context, msg string) error {
 		return err
 	}
 	return g.run(ctx, g.stagingDir, "push")
+}
+
+func (g *Git) Fetch(ctx context.Context) error {
+	// If the repo has no commits yet there is nothing to fetch.
+	if err := g.run(ctx, g.stagingDir, "rev-parse", "HEAD"); err != nil {
+		return nil
+	}
+	return g.run(ctx, g.stagingDir, "fetch", "origin")
+}
+
+func (g *Git) FetchedFiles(ctx context.Context) ([]string, error) {
+	// If no fetch has been done, FETCH_HEAD won't exist.
+	fetchHeadPath := filepath.Join(g.stagingDir, ".git", "FETCH_HEAD")
+	if _, err := os.Stat(fetchHeadPath); os.IsNotExist(err) {
+		return nil, nil
+	}
+	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", "HEAD", "FETCH_HEAD")
+	cmd.Dir = g.stagingDir
+	out, err := cmd.Output()
+	if err != nil {
+		// Gracefully handle empty repo or identical refs.
+		return nil, nil
+	}
+	var files []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, nil
 }
 
 func (g *Git) Pull(ctx context.Context) error {

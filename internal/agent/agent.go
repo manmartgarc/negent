@@ -67,8 +67,9 @@ type Agent interface {
 	// agent's source dir, handling any agent-specific path translation.
 	Place(stagingDir string, files []SyncFile) (*PlaceResult, error)
 
-	// Diff compares local state against staged state, returning changes.
-	Diff(stagingDir string) ([]backend.FileChange, error)
+	// Diff compares local state against staged state for the given categories,
+	// returning changes. Only files that would be collected are considered.
+	Diff(stagingDir string, categories []Category) ([]backend.FileChange, error)
 
 	// DefaultCategories returns which categories to sync by default.
 	DefaultCategories() []Category

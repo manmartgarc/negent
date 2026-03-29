@@ -37,7 +37,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	agents, _, err := buildAgents(cfg)
+	agents, categories, err := buildAgents(cfg)
 	if err != nil {
 		return err
 	}
@@ -46,7 +46,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	for name, ag := range agents {
 		agentStagingDir := filepath.Join(stagingDir, name)
-		changes, err := ag.Diff(agentStagingDir)
+		changes, err := ag.Diff(agentStagingDir, categories[name])
 		if err != nil {
 			fmt.Printf("%s: error: %v\n", name, err)
 			continue

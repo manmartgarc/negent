@@ -240,6 +240,8 @@ func TestDecodeProjectPath(t *testing.T) {
 		want    string
 	}{
 		{"-home-user-repos-myproject", "/home/user/repos/myproject"},
+		// On Linux, Windows-encoded paths are decoded as Unix paths (best-effort).
+		// On Windows, decodeProjectPath would return "C:\Users\user\repos\myproject".
 		{"-C-Users-user-repos-myproject", "/C/Users/user/repos/myproject"},
 		{"-home-user", "/home/user"},
 	}

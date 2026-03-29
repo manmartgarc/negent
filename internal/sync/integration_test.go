@@ -147,6 +147,72 @@ func TestIntegrationPushIdempotent(t *testing.T) {
 	}
 }
 
+func TestIntegrationConflictDetection(t *testing.T) {
+	remote := initBareRepo(t)
+	staging1 := filepath.Join(t.TempDir(), "staging1")
+	staging2 := filepath.Join(t.TempDir(), "staging2")
+	ctx := context.Background()
+
+	cats := map[string][]agent.Category{
+		"claude": {agent.CategoryConfig},
+	}
+
+	// Machine A: push initial content.
+	srcA := t.TempDir()
+	os.WriteFile(filepath.Join(srcA, "CLAUDE.md"), []byte("initial"), 0o644)
+	beA := gitbackend.New(remote, staging1)
+	if err := beA.Init(ctx, nil); err != nil {
+		t.Fatalf("beA Init: %v", err)
+	}
+	agA := agentclaude.New(srcA)
+	orchA := NewOrchestrator(beA, map[string]agent.Agent{"claude": agA})
+	if err := orchA.Push(ctx, cats); err != nil {
+		t.Fatalf("Push A initial: %v", err)
+	}
+
+	// Machine B: pull the initial content.
+	srcB := t.TempDir()
+	beB := gitbackend.New(remote, staging2)
+	if err := beB.Init(ctx, nil); err != nil {
+		t.Fatalf("beB Init: %v", err)
+	}
+	agB := agentclaude.New(srcB)
+	orchB := NewOrchestrator(beB, map[string]agent.Agent{"claude": agB})
+	if err := orchB.Pull(ctx, cats); err != nil {
+		t.Fatalf("Pull B initial: %v", err)
+	}
+	// Verify initial placement.
+	data, err := os.ReadFile(filepath.Join(srcB, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md on B after initial pull: %v", err)
+	}
+	if string(data) != "initial" {
+		t.Fatalf("expected 'initial', got %q", data)
+	}
+
+	// Machine B: edit CLAUDE.md locally (diverges from staging base = "initial").
+	os.WriteFile(filepath.Join(srcB, "CLAUDE.md"), []byte("B's local changes"), 0o644)
+
+	// Machine A: push a different update to CLAUDE.md.
+	os.WriteFile(filepath.Join(srcA, "CLAUDE.md"), []byte("A's update"), 0o644)
+	if err := orchA.Push(ctx, cats); err != nil {
+		t.Fatalf("Push A update: %v", err)
+	}
+
+	// Machine B: pull — must detect the conflict and preserve local content.
+	if err := orchB.Pull(ctx, cats); err != nil {
+		t.Fatalf("Pull B conflict: %v", err)
+	}
+
+	data, err = os.ReadFile(filepath.Join(srcB, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md on B after conflict pull: %v", err)
+	}
+	if string(data) != "B's local changes" {
+		t.Errorf("CLAUDE.md = %q, want %q (local must be preserved on conflict)", data, "B's local changes")
+	}
+}
+
 func TestIntegrationPullEmptyRemote(t *testing.T) {
 	remote := initBareRepo(t)
 	staging := filepath.Join(t.TempDir(), "staging")

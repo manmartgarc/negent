@@ -23,13 +23,17 @@ type Config struct {
 	Agents  map[string]AgentConfig `mapstructure:"agents" yaml:"agents"`
 }
 
-// DefaultPath returns the default config file path (~/.config/negent/config.yaml).
+// DefaultPath returns the default config file path.
+// On Linux: $XDG_CONFIG_HOME/negent/config.yaml or ~/.config/negent/config.yaml
+// On Windows: %APPDATA%\negent\config.yaml
+// On macOS: ~/Library/Application Support/negent/config.yaml
 func DefaultPath() string {
-	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		return filepath.Join(dir, "negent", "config.yaml")
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".config")
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "negent", "config.yaml")
+	return filepath.Join(dir, "negent", "config.yaml")
 }
 
 // Load reads the config from the given path.
