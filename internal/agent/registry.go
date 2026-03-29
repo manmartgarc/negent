@@ -1,6 +1,9 @@
 package agent
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 // KnownAgent describes a built-in agent that negent knows how to sync.
 type KnownAgent struct {
@@ -40,5 +43,5 @@ func ExpandHome(path string) string {
 	if err != nil {
 		return path
 	}
-	return home + path[1:]
+	return filepath.Join(home, path[2:])
 }

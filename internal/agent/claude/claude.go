@@ -32,8 +32,6 @@ type collectionRule struct {
 var categoryRules = map[agent.Category][]collectionRule{
 	agent.CategoryConfig: {
 		{Glob: "CLAUDE.md"},
-		{Glob: "settings.json"},
-		{Glob: "settings.local.json"},
 	},
 	agent.CategoryCustomCode: {
 		{Dir: "commands"},
@@ -90,6 +88,7 @@ type SidecarMeta struct {
 	Segments     []string `json:"segments"`
 	GitRemote    string   `json:"git_remote,omitempty"`
 	OS           string   `json:"os"`
+	IsHome       bool     `json:"is_home,omitempty"`
 }
 
 // Claude implements agent.Agent for Claude Code.
@@ -340,7 +339,20 @@ func (c *Claude) matchProject(remoteDir string, meta SidecarMeta, localProjects 
 		}
 	}
 
-	// Tier 4: Manual link from config
+	// Tier 4: Home directory match — if the remote project is the other
+	// machine's home dir, match it to the local home dir project.
+	if meta.IsHome || looksLikeHomeDir(meta) {
+		homeDir, _ := os.UserHomeDir()
+		if homeDir != "" {
+			for localDir, localPath := range localProjects {
+				if filepath.Clean(localPath) == filepath.Clean(homeDir) {
+					return localDir, true
+				}
+			}
+		}
+	}
+
+	// Tier 5: Manual link from config
 	if c.links != nil {
 		if localPath, ok := c.links[remoteDir]; ok {
 			// Find or create the local encoded dir for this path
@@ -353,7 +365,7 @@ func (c *Claude) matchProject(remoteDir string, meta SidecarMeta, localProjects 
 		}
 	}
 
-	// Tier 5: No match — stage for later
+	// Tier 6: No match — stage for later
 	return "", false
 }
 
@@ -396,6 +408,105 @@ func (c *Claude) listLocalProjects() (map[string]string, error) {
 	return projects, nil
 }
 
+// listStagingProjects reads sidecar .meta.json files from the staging
+// directory and returns a map of encoded dir name -> SidecarMeta.
+func listStagingProjects(stagingDir string) (map[string]SidecarMeta, error) {
+	projectsDir := filepath.Join(stagingDir, "projects")
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	projects := make(map[string]SidecarMeta)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".meta.json") {
+			continue
+		}
+		encodedDir := strings.TrimSuffix(name, ".meta.json")
+		data, err := os.ReadFile(filepath.Join(projectsDir, name))
+		if err != nil {
+			continue
+		}
+		var meta SidecarMeta
+		if json.Unmarshal(data, &meta) == nil {
+			projects[encodedDir] = meta
+		}
+	}
+	return projects, nil
+}
+
+// buildProjectMapping returns a map of localEncodedDir -> stagingEncodedDir
+// for projects that exist in staging under a different path encoding (cross-machine).
+// Projects with the same encoding on both sides are omitted (no remapping needed).
+func (c *Claude) buildProjectMapping(stagingDir string) (map[string]string, error) {
+	localProjects, err := c.listLocalProjects()
+	if err != nil {
+		return nil, err
+	}
+	stagingProjects, err := listStagingProjects(stagingDir)
+	if err != nil {
+		return nil, err
+	}
+	if len(localProjects) == 0 || len(stagingProjects) == 0 {
+		return nil, nil
+	}
+
+	mapping := make(map[string]string)
+	for stagingName, meta := range stagingProjects {
+		localDir, matched := c.matchProject(stagingName, meta, localProjects)
+		if matched && localDir != stagingName {
+			mapping[localDir] = stagingName
+		}
+	}
+	return mapping, nil
+}
+
+// remapStagingPath rewrites the project directory segment of a staging path
+// using the given mapping. Non-project paths and sidecar files are returned as-is.
+func remapStagingPath(stagingPath string, mapping map[string]string) string {
+	if len(mapping) == 0 {
+		return stagingPath
+	}
+	parts := strings.SplitN(stagingPath, "/", 3)
+	if len(parts) < 2 || parts[0] != "projects" {
+		return stagingPath
+	}
+	if strings.HasSuffix(parts[1], ".meta.json") {
+		return stagingPath
+	}
+	if remapped, ok := mapping[parts[1]]; ok {
+		if len(parts) == 3 {
+			return "projects/" + remapped + "/" + parts[2]
+		}
+		return "projects/" + remapped
+	}
+	return stagingPath
+}
+
+// MapStagingPaths implements agent.StagingMapper. It rewrites StagingPath
+// fields for project files that have cross-machine equivalents in staging.
+// Sidecar files are not remapped — both machines' sidecars coexist in staging.
+func (c *Claude) MapStagingPaths(stagingDir string, files []agent.SyncFile) ([]agent.SyncFile, error) {
+	mapping, err := c.buildProjectMapping(stagingDir)
+	if err != nil {
+		return nil, fmt.Errorf("building project mapping: %w", err)
+	}
+	if len(mapping) == 0 {
+		return files, nil
+	}
+
+	result := make([]agent.SyncFile, len(files))
+	for i, f := range files {
+		result[i] = f
+		result[i].StagingPath = remapStagingPath(f.StagingPath, mapping)
+	}
+	return result, nil
+}
+
 // copyFileForPlace copies a file from src to dst, creating parent dirs as needed.
 func copyFileForPlace(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -415,35 +526,79 @@ func (c *Claude) Diff(stagingDir string, categories []agent.Category) ([]backend
 		return nil, fmt.Errorf("collecting files: %w", err)
 	}
 
+	// Build cross-machine project mapping so we compare against the right
+	// staging paths and don't report other machines' project dirs as deletions.
+	mapping, _ := c.buildProjectMapping(stagingDir)
+
+	// Collect local project dir names so we know which staging project dirs
+	// belong to this machine.
+	localProjectDirs := make(map[string]bool)
+	localProjects, _ := c.listLocalProjects()
+	for dirName := range localProjects {
+		localProjectDirs[dirName] = true
+	}
+	// Cross-machine staging dirs (mapped from local projects) should also
+	// be skipped — files under these belong to both machines and are handled
+	// by the local-vs-staging comparison above.
+	crossMachineDirs := make(map[string]bool)
+	for _, stagingName := range mapping {
+		crossMachineDirs[stagingName] = true
+	}
+
 	var changes []backend.FileChange
 	localPaths := make(map[string]bool, len(files))
 
 	for _, f := range files {
-		localPaths[f.StagingPath] = true
+		mapped := remapStagingPath(f.StagingPath, mapping)
+		localPaths[mapped] = true
 		localData, err := os.ReadFile(filepath.Join(c.sourceDir, f.RelPath))
 		if err != nil {
 			continue
 		}
-		stagedPath := filepath.Join(stagingDir, f.StagingPath)
+		stagedPath := filepath.Join(stagingDir, mapped)
 		stagedData, err := os.ReadFile(stagedPath)
 		if os.IsNotExist(err) {
-			changes = append(changes, backend.FileChange{Path: f.StagingPath, Kind: backend.ChangeAdded})
+			changes = append(changes, backend.FileChange{Path: mapped, Kind: backend.ChangeAdded})
 		} else if err == nil && string(localData) != string(stagedData) {
-			changes = append(changes, backend.FileChange{Path: f.StagingPath, Kind: backend.ChangeModified})
+			changes = append(changes, backend.FileChange{Path: mapped, Kind: backend.ChangeModified})
 		}
+	}
+
+	// Build set of enabled categories for filtering the deletion scan.
+	catSet := make(map[agent.Category]bool, len(categories))
+	for _, cat := range categories {
+		catSet[cat] = true
 	}
 
 	// Find staged files not present locally (deletions)
 	if _, err := os.Stat(stagingDir); err == nil {
-		filepath.WalkDir(stagingDir, func(path string, d os.DirEntry, err error) error {
+		filepath.WalkDir(stagingDir, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
 			if err != nil || d.IsDir() {
 				return err
 			}
 			relPath, _ := filepath.Rel(stagingDir, path)
 			relPath = filepath.ToSlash(relPath)
-			if !localPaths[relPath] {
-				changes = append(changes, backend.FileChange{Path: relPath, Kind: backend.ChangeDeleted})
+			if localPaths[relPath] {
+				return nil
 			}
+			// Only report deletions for files that belong to an enabled category.
+			if cat := categorizePath(relPath); cat != "" && !catSet[cat] {
+				return nil
+			}
+			// Skip project files that don't belong to this machine:
+			// - cross-machine dirs (matched to a local project under a different encoding)
+			// - remote-only dirs (no local project at all)
+			parts := strings.SplitN(relPath, "/", 3)
+			if len(parts) >= 2 && parts[0] == "projects" {
+				dirName := parts[1]
+				if strings.HasSuffix(dirName, ".meta.json") {
+					dirName = strings.TrimSuffix(dirName, ".meta.json")
+				}
+				if crossMachineDirs[dirName] || !localProjectDirs[dirName] {
+					return nil
+				}
+			}
+			changes = append(changes, backend.FileChange{Path: relPath, Kind: backend.ChangeDeleted})
 			return nil
 		})
 	}
@@ -488,6 +643,8 @@ func (c *Claude) generateSidecars() ([]agent.SyncFile, error) {
 		return nil, err
 	}
 
+	homeDir, _ := os.UserHomeDir()
+
 	var files []agent.SyncFile
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -503,6 +660,7 @@ func (c *Claude) generateSidecars() ([]agent.SyncFile, error) {
 			Segments:     segments,
 			GitRemote:    gitRemoteFor(absPath),
 			OS:           runtime.GOOS,
+			IsHome:       homeDir != "" && filepath.Clean(absPath) == filepath.Clean(homeDir),
 		}
 
 		data, err := json.MarshalIndent(meta, "", "  ")
@@ -527,6 +685,61 @@ func (c *Claude) generateSidecars() ([]agent.SyncFile, error) {
 	return files, nil
 }
 
+// categorizePath returns the category a staging-relative path belongs to,
+// or empty string if it cannot be determined.
+func categorizePath(relPath string) agent.Category {
+	switch {
+	case relPath == "history.jsonl":
+		return agent.CategoryHistory
+	case relPath == "CLAUDE.md" || relPath == "settings.json":
+		return agent.CategoryConfig
+	case relPath == "settings.local.json":
+		return agent.CategoryConfig
+	case strings.HasPrefix(relPath, "commands/") ||
+		strings.HasPrefix(relPath, "skills/") ||
+		strings.HasPrefix(relPath, "agents/") ||
+		strings.HasPrefix(relPath, "rules/"):
+		return agent.CategoryCustomCode
+	case strings.HasPrefix(relPath, "projects/"):
+		parts := strings.SplitN(relPath, "/", 3)
+		if len(parts) < 3 {
+			return ""
+		}
+		if strings.HasSuffix(parts[1], ".meta.json") {
+			return agent.CategoryMemory // sidecars are generated alongside memory/sessions
+		}
+		sub := parts[2]
+		if strings.HasPrefix(sub, "memory/") {
+			return agent.CategoryMemory
+		}
+		if strings.HasSuffix(sub, ".jsonl") {
+			return agent.CategorySessions
+		}
+	}
+	return ""
+}
+
+// looksLikeHomeDir heuristically detects whether a sidecar's absolute path
+// is a home directory based on the OS and path pattern. This allows matching
+// even when the sidecar was generated before the IsHome field was added.
+func looksLikeHomeDir(meta SidecarMeta) bool {
+	if len(meta.Segments) == 0 {
+		return false
+	}
+	switch meta.OS {
+	case "linux":
+		// /home/<username>
+		return len(meta.Segments) == 2 && meta.Segments[0] == "home"
+	case "darwin":
+		// /Users/<username>
+		return len(meta.Segments) == 2 && meta.Segments[0] == "Users"
+	case "windows":
+		// C:\Users\<username>
+		return len(meta.Segments) == 3 && meta.Segments[1] == "Users"
+	}
+	return false
+}
+
 // decodeProjectPath converts a Claude-encoded directory name back to an
 // absolute path. The encoding replaces path separators with dashes.
 // This is inherently ambiguous (dash is also a valid path char), but we
@@ -535,9 +748,12 @@ func decodeProjectPath(encoded string) string {
 	encoded = strings.TrimPrefix(encoded, "-")
 	if runtime.GOOS == "windows" && len(encoded) >= 2 && encoded[1] == '-' &&
 		encoded[0] >= 'A' && encoded[0] <= 'Z' {
-		// Windows-encoded path: "C-Users-foo" -> "C:\Users\foo"
+		// Claude on Windows encodes C:\Users\foo as C--Users-foo
+		// (colon→dash, backslash→dash). encoded[2:] starts with the dash
+		// that represents the first backslash, so replacing dashes with
+		// backslashes already produces \Users\foo — just prepend "C:".
 		rest := strings.ReplaceAll(encoded[2:], "-", `\`)
-		return string(encoded[0]) + `:\` + rest
+		return string(encoded[0]) + ":" + rest
 	}
 	return "/" + strings.ReplaceAll(encoded, "-", "/")
 }

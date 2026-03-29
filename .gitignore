@@ -33,3 +33,6 @@ negent
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Claude Code
+.claude/

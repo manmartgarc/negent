@@ -44,6 +44,14 @@ func (o *Orchestrator) Push(ctx context.Context, categories map[string][]agent.C
 		}
 
 		agentDir := filepath.Join(stagingDir, name)
+
+		// Remap staging paths for cross-machine project matching.
+		if mapper, ok := ag.(agent.StagingMapper); ok {
+			files, err = mapper.MapStagingPaths(agentDir, files)
+			if err != nil {
+				return fmt.Errorf("mapping staging paths for %s: %w", name, err)
+			}
+		}
 		if err := os.MkdirAll(agentDir, 0o755); err != nil {
 			return fmt.Errorf("creating agent dir %s: %w", agentDir, err)
 		}

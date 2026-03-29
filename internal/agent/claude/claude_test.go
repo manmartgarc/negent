@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/manmart/negent/internal/agent"
+	"github.com/manmart/negent/internal/backend"
 )
 
 func TestNew(t *testing.T) {
@@ -124,10 +126,14 @@ func TestCollectConfig(t *testing.T) {
 		}
 	}
 
-	for _, expected := range []string{"CLAUDE.md", "settings.json", "settings.local.json"} {
-		if !paths[expected] {
-			t.Errorf("missing config file: %s", expected)
-		}
+	if !paths["CLAUDE.md"] {
+		t.Error("missing config file: CLAUDE.md")
+	}
+	if paths["settings.json"] {
+		t.Error("settings.json should not be collected (machine-specific)")
+	}
+	if paths["settings.local.json"] {
+		t.Error("settings.local.json should not be collected")
 	}
 
 	// Should NOT include credentials
@@ -235,15 +241,20 @@ func TestCollectExcludes(t *testing.T) {
 }
 
 func TestDecodeProjectPath(t *testing.T) {
-	tests := []struct {
+	type testCase struct {
 		encoded string
 		want    string
-	}{
+	}
+	tests := []testCase{
 		{"-home-user-repos-myproject", "/home/user/repos/myproject"},
-		// On Linux, Windows-encoded paths are decoded as Unix paths (best-effort).
-		// On Windows, decodeProjectPath would return "C:\Users\user\repos\myproject".
-		{"-C-Users-user-repos-myproject", "/C/Users/user/repos/myproject"},
 		{"-home-user", "/home/user"},
+	}
+	// Windows-encoded paths decode to native Windows paths on Windows,
+	// and fall back to Unix-style best-effort decoding on other platforms.
+	if runtime.GOOS == "windows" {
+		tests = append(tests, testCase{"C--Users-user-repos-myproject", `C:\Users\user\repos\myproject`})
+	} else {
+		tests = append(tests, testCase{"-C-Users-user-repos-myproject", "/C/Users/user/repos/myproject"})
 	}
 	for _, tt := range tests {
 		got := decodeProjectPath(tt.encoded)
@@ -485,5 +496,187 @@ func TestSuffixMatchScore(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("suffixMatchScore(%v, %v) = %d, want %d", tt.a, tt.b, got, tt.want)
 		}
+	}
+}
+
+// --- Cross-machine mapping tests ---
+
+// setupCrossMachineTest creates a local dir with a "Windows" project and a
+// staging dir with a "Linux" project + sidecar that share the same suffix.
+func setupCrossMachineTest(t *testing.T) (localDir, stagingDir string) {
+	t.Helper()
+	localDir = t.TempDir()
+	stagingDir = t.TempDir()
+
+	// Local project (simulates Windows encoding)
+	localProj := filepath.Join(localDir, "projects", "C--Users-user-repos-myproject")
+	os.MkdirAll(filepath.Join(localProj, "memory"), 0o755)
+	writeFile(t, filepath.Join(localProj, "memory", "MEMORY.md"), "local memory")
+
+	// Staging project (simulates Linux encoding with sidecar)
+	stagingProj := filepath.Join(stagingDir, "projects", "-home-user-repos-myproject")
+	os.MkdirAll(filepath.Join(stagingProj, "memory"), 0o755)
+	writeFile(t, filepath.Join(stagingProj, "memory", "MEMORY.md"), "remote memory")
+	writeFile(t, filepath.Join(stagingProj, "memory", "remote-only.md"), "remote only file")
+
+	sidecar := SidecarMeta{
+		AbsolutePath: "/home/user/repos/myproject",
+		Segments:     []string{"home", "user", "repos", "myproject"},
+		OS:           "linux",
+	}
+	data, _ := json.Marshal(sidecar)
+	writeFile(t, filepath.Join(stagingDir, "projects", "-home-user-repos-myproject.meta.json"), string(data))
+
+	return localDir, stagingDir
+}
+
+func TestListStagingProjects(t *testing.T) {
+	stagingDir := t.TempDir()
+
+	sidecar := SidecarMeta{
+		AbsolutePath: "/home/user/repos/myproject",
+		Segments:     []string{"home", "user", "repos", "myproject"},
+		GitRemote:    "https://github.com/user/myproject.git",
+		OS:           "linux",
+	}
+	data, _ := json.Marshal(sidecar)
+	writeFile(t, filepath.Join(stagingDir, "projects", "-home-user-repos-myproject.meta.json"), string(data))
+
+	projects, err := listStagingProjects(stagingDir)
+	if err != nil {
+		t.Fatalf("listStagingProjects: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("got %d projects, want 1", len(projects))
+	}
+	meta, ok := projects["-home-user-repos-myproject"]
+	if !ok {
+		t.Fatal("missing -home-user-repos-myproject")
+	}
+	if meta.GitRemote != "https://github.com/user/myproject.git" {
+		t.Errorf("GitRemote = %q, want %q", meta.GitRemote, "https://github.com/user/myproject.git")
+	}
+}
+
+func TestListStagingProjectsEmpty(t *testing.T) {
+	stagingDir := t.TempDir()
+	projects, err := listStagingProjects(stagingDir)
+	if err != nil {
+		t.Fatalf("listStagingProjects: %v", err)
+	}
+	if len(projects) != 0 {
+		t.Errorf("got %d projects, want 0", len(projects))
+	}
+}
+
+func TestBuildProjectMapping(t *testing.T) {
+	localDir, stagingDir := setupCrossMachineTest(t)
+	c := New(localDir)
+
+	mapping, err := c.buildProjectMapping(stagingDir)
+	if err != nil {
+		t.Fatalf("buildProjectMapping: %v", err)
+	}
+
+	// "C--Users-user-repos-myproject" should map to "-home-user-repos-myproject"
+	// via suffix match (user/repos/myproject = 3 matching segments)
+	want := "-home-user-repos-myproject"
+	got, ok := mapping["C--Users-user-repos-myproject"]
+	if !ok {
+		t.Fatalf("no mapping for C--Users-user-repos-myproject; mapping = %v", mapping)
+	}
+	if got != want {
+		t.Errorf("mapping = %q, want %q", got, want)
+	}
+}
+
+func TestRemapStagingPath(t *testing.T) {
+	mapping := map[string]string{
+		"C--Users-user-repos-myproject": "-home-user-repos-myproject",
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		// Project files get remapped
+		{"projects/C--Users-user-repos-myproject/memory/MEMORY.md", "projects/-home-user-repos-myproject/memory/MEMORY.md"},
+		// Sidecar files are NOT remapped
+		{"projects/C--Users-user-repos-myproject.meta.json", "projects/C--Users-user-repos-myproject.meta.json"},
+		// Non-project files are NOT remapped
+		{"settings.json", "settings.json"},
+		{"CLAUDE.md", "CLAUDE.md"},
+		// Unmapped projects keep their encoding
+		{"projects/-other-project/memory/foo.md", "projects/-other-project/memory/foo.md"},
+	}
+
+	for _, tt := range tests {
+		got := remapStagingPath(tt.input, mapping)
+		if got != tt.want {
+			t.Errorf("remapStagingPath(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestMapStagingPaths(t *testing.T) {
+	localDir, stagingDir := setupCrossMachineTest(t)
+	c := New(localDir)
+
+	files := []agent.SyncFile{
+		{RelPath: "CLAUDE.md", StagingPath: "CLAUDE.md"},
+		{RelPath: "projects/C--Users-user-repos-myproject/memory/MEMORY.md", StagingPath: "projects/C--Users-user-repos-myproject/memory/MEMORY.md"},
+		{RelPath: "projects/C--Users-user-repos-myproject.meta.json", StagingPath: "projects/C--Users-user-repos-myproject.meta.json"},
+	}
+
+	result, err := c.MapStagingPaths(stagingDir, files)
+	if err != nil {
+		t.Fatalf("MapStagingPaths: %v", err)
+	}
+
+	if result[0].StagingPath != "CLAUDE.md" {
+		t.Errorf("non-project file remapped: %q", result[0].StagingPath)
+	}
+	if result[1].StagingPath != "projects/-home-user-repos-myproject/memory/MEMORY.md" {
+		t.Errorf("project file not remapped: %q", result[1].StagingPath)
+	}
+	if result[2].StagingPath != "projects/C--Users-user-repos-myproject.meta.json" {
+		t.Errorf("sidecar file was remapped: %q", result[2].StagingPath)
+	}
+}
+
+func TestDiffCrossMachine(t *testing.T) {
+	localDir, stagingDir := setupCrossMachineTest(t)
+	c := New(localDir)
+
+	// Also add a config file that exists in both
+	writeFile(t, filepath.Join(localDir, "CLAUDE.md"), "local instructions")
+	writeFile(t, filepath.Join(stagingDir, "CLAUDE.md"), "local instructions")
+
+	changes, err := c.Diff(stagingDir, []agent.Category{agent.CategoryConfig, agent.CategoryMemory})
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+
+	for _, ch := range changes {
+		// Should NOT see the Linux-encoded project dir as "Deleted"
+		if ch.Kind == backend.ChangeDeleted && ch.Path == "projects/-home-user-repos-myproject/memory/remote-only.md" {
+			t.Error("cross-machine file incorrectly reported as deleted")
+		}
+		// Should NOT see the Windows-encoded project dir as "Added"
+		if ch.Kind == backend.ChangeAdded && ch.Path == "projects/C--Users-user-repos-myproject/memory/MEMORY.md" {
+			t.Error("local file incorrectly reported as new (should map to existing staging path)")
+		}
+	}
+
+	// The memory file exists on both sides — check if it's reported as modified
+	// (content differs: "local memory" vs "remote memory")
+	foundModified := false
+	for _, ch := range changes {
+		if ch.Kind == backend.ChangeModified && ch.Path == "projects/-home-user-repos-myproject/memory/MEMORY.md" {
+			foundModified = true
+		}
+	}
+	if !foundModified {
+		t.Error("expected MEMORY.md to be reported as modified (local vs remote content differs)")
 	}
 }
