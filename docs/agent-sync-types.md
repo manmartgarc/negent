@@ -13,6 +13,7 @@ Negent syncs these Claude-specific type IDs:
 - `commands`: `commands/*.md`
 - `skills`: `skills/<name>/`
 - `agents`: `agents/*.md`
+- `plugins`: `plugins/<name>/`
 - `output-styles`: `output-styles/*.md`
 - `agent-memory`: `agent-memory/<name>/`
 - `auto-memory`: `projects/<project>/memory/`
@@ -27,6 +28,7 @@ Default Claude sync types:
 - `commands`
 - `skills`
 - `agents`
+- `plugins`
 - `output-styles`
 - `agent-memory`
 - `auto-memory`
@@ -47,3 +49,4 @@ Legacy Claude config aliases still accepted on read:
 - `memory` -> `agent-memory`, `auto-memory`
 - `sessions` -> `sessions`
 - `history` -> `history`
+- `plugins` -> `plugins`

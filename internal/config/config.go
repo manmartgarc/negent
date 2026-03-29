@@ -73,7 +73,10 @@ func Save(cfg *Config, path string) error {
 	v.Set("machine", cfg.Machine)
 	v.Set("agents", cfg.Agents)
 
-	return v.WriteConfig()
+	if Exists(path) {
+		return v.WriteConfig()
+	}
+	return v.WriteConfigAs(path)
 }
 
 // Exists returns true if the config file exists at the given path.

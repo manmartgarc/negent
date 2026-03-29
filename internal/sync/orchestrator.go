@@ -20,12 +20,124 @@ type Orchestrator struct {
 	agents  map[string]agent.Agent
 }
 
+// PlanAction describes a user-visible sync operation.
+type PlanAction string
+
+const (
+	ActionUpload       PlanAction = "upload"
+	ActionDeleteRemote PlanAction = "delete-remote"
+	ActionDownload     PlanAction = "download"
+	ActionOverwrite    PlanAction = "overwrite"
+	ActionConflict     PlanAction = "conflict"
+)
+
+// PlannedChange is one user-visible sync action.
+type PlannedChange struct {
+	Agent  string
+	Path   string
+	Action PlanAction
+}
+
+// SyncPlan is a remote-aware preview of pending sync work.
+type SyncPlan struct {
+	Local  []PlannedChange
+	Remote []PlannedChange
+}
+
 // NewOrchestrator creates a new sync orchestrator.
 func NewOrchestrator(be backend.Backend, agents map[string]agent.Agent) *Orchestrator {
 	return &Orchestrator{
 		backend: be,
 		agents:  agents,
 	}
+}
+
+// Plan returns a remote-aware sync preview for all configured agents.
+func (o *Orchestrator) Plan(ctx context.Context, syncTypes map[string][]agent.SyncType) (*SyncPlan, error) {
+	plan := &SyncPlan{}
+	stagingDir := o.backend.StagingDir()
+
+	remoteChanges, err := o.backend.FetchedFiles(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading fetched files: %w", err)
+	}
+
+	base := snapshotBase(stagingDir, o.agents, syncTypes)
+
+	// Group remote changes by agent to avoid O(agents × remoteChanges).
+	remoteByAgent := make(map[string][]backend.FileChange)
+	for _, ch := range remoteChanges {
+		agentName, _, ok := splitAgentPath(ch.Path)
+		if ok {
+			remoteByAgent[agentName] = append(remoteByAgent[agentName], ch)
+		}
+	}
+
+	for name, ag := range o.agents {
+		types, ok := syncTypes[name]
+		if !ok {
+			continue
+		}
+
+		agentDir := filepath.Join(stagingDir, name)
+		localChanges, err := ag.Diff(agentDir, types)
+		if err != nil {
+			return nil, fmt.Errorf("diffing %s: %w", name, err)
+		}
+		for _, ch := range localChanges {
+			action := ActionUpload
+			if ch.Kind == backend.ChangeDeleted {
+				action = ActionDeleteRemote
+			}
+			plan.Local = append(plan.Local, PlannedChange{
+				Agent:  name,
+				Path:   ch.Path,
+				Action: action,
+			})
+		}
+
+		typeSet := agent.SyncTypeSet(types)
+		for _, ch := range remoteByAgent[name] {
+			_, relPath, _ := splitAgentPath(ch.Path)
+			syncType := ag.SyncTypeForPath(relPath)
+			if syncType == "" || !typeSet[syncType] {
+				continue
+			}
+			if ch.Kind == backend.ChangeDeleted {
+				continue
+			}
+
+			if strings.HasPrefix(relPath, "projects/") {
+				plan.Remote = append(plan.Remote, PlannedChange{
+					Agent:  name,
+					Path:   relPath,
+					Action: ActionDownload,
+				})
+				continue
+			}
+
+			action := ActionDownload
+			localPath := filepath.Join(ag.SourceDir(), relPath)
+			localContent, localErr := os.ReadFile(localPath)
+			baseContent, hasBase := base[name][relPath]
+			switch {
+			case localErr == nil && !hasBase:
+				action = ActionConflict
+			case localErr == nil && hasBase && !bytes.Equal(localContent, baseContent):
+				action = ActionConflict
+			case localErr == nil:
+				action = ActionOverwrite
+			}
+
+			plan.Remote = append(plan.Remote, PlannedChange{
+				Agent:  name,
+				Path:   relPath,
+				Action: action,
+			})
+		}
+	}
+
+	return plan, nil
 }
 
 // Push collects files from all configured agents and pushes them to the backend.
@@ -144,28 +256,7 @@ func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.Sy
 	// Snapshot staged content for non-project files before the working tree is
 	// updated. This is the base: the last remote state this machine synced to.
 	// Project dirs use path-encoded names; Place() handles matching for those.
-	base := make(map[string]map[string][]byte) // agent -> stagingRelPath -> bytes
-	for name := range o.agents {
-		if _, ok := syncTypes[name]; !ok {
-			continue
-		}
-		agentDir := filepath.Join(stagingDir, name)
-		base[name] = make(map[string][]byte)
-		filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
-			if err != nil || d.IsDir() {
-				return err
-			}
-			relPath, _ := filepath.Rel(agentDir, path)
-			relPath = filepath.ToSlash(relPath)
-			if strings.HasPrefix(relPath, "projects/") {
-				return nil
-			}
-			if content, err := os.ReadFile(path); err == nil {
-				base[name][relPath] = content
-			}
-			return nil
-		})
-	}
+	base := snapshotBase(stagingDir, o.agents, syncTypes)
 
 	// Integrate remote changes into the working tree.
 	if err := o.backend.Pull(ctx); err != nil {
@@ -336,4 +427,38 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(out, in)
 	return err
+}
+
+func snapshotBase(stagingDir string, agents map[string]agent.Agent, syncTypes map[string][]agent.SyncType) map[string]map[string][]byte {
+	base := make(map[string]map[string][]byte)
+	for name := range agents {
+		if _, ok := syncTypes[name]; !ok {
+			continue
+		}
+		agentDir := filepath.Join(stagingDir, name)
+		base[name] = make(map[string][]byte)
+		filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
+			if err != nil || d.IsDir() {
+				return err
+			}
+			relPath, _ := filepath.Rel(agentDir, path)
+			relPath = filepath.ToSlash(relPath)
+			if strings.HasPrefix(relPath, "projects/") {
+				return nil
+			}
+			if content, err := os.ReadFile(path); err == nil {
+				base[name][relPath] = content
+			}
+			return nil
+		})
+	}
+	return base
+}
+
+func splitAgentPath(path string) (agentName string, relPath string, ok bool) {
+	parts := strings.SplitN(filepath.ToSlash(path), "/", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }

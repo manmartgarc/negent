@@ -21,15 +21,15 @@ var pushCmd = &cobra.Command{
 	RunE:  runPush,
 }
 
+var pushDryRunFlag bool
+
 func init() {
+	pushCmd.Flags().BoolVar(&pushDryRunFlag, "dry-run", false, "preview push changes without writing to staging or remote")
 	rootCmd.AddCommand(pushCmd)
 }
 
 func runPush(cmd *cobra.Command, args []string) error {
-	cfgPath := cfgFile
-	if cfgPath == "" {
-		cfgPath = config.DefaultPath()
-	}
+	cfgPath := resolveConfigPath()
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -47,6 +47,19 @@ func runPush(cmd *cobra.Command, args []string) error {
 	}
 
 	orch := sync.NewOrchestrator(be, agents)
+
+	if pushDryRunFlag {
+		if err := be.Fetch(context.Background()); err != nil {
+			return fmt.Errorf("push preview failed: fetching backend: %w", err)
+		}
+		plan, err := orch.Plan(context.Background(), syncTypes)
+		if err != nil {
+			return fmt.Errorf("push preview failed: %w", err)
+		}
+		printPlanSummary(plan)
+		printPlannedChanges("Push preview:", plan.Local)
+		return nil
+	}
 
 	fmt.Println("Pushing...")
 	if err := orch.Push(context.Background(), syncTypes); err != nil {

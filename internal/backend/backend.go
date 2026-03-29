@@ -31,10 +31,10 @@ type Backend interface {
 	// This allows conflict detection before merging remote changes locally.
 	Fetch(ctx context.Context) error
 
-	// FetchedFiles returns staging-relative paths of files that differ between
-	// the current HEAD and the most recent fetch. Returns nil if nothing was fetched
-	// or the remote has no new changes.
-	FetchedFiles(ctx context.Context) ([]string, error)
+	// FetchedFiles returns staging-relative file changes between the current
+	// HEAD and the most recent fetch. Returns nil if nothing was fetched or the
+	// remote has no new changes.
+	FetchedFiles(ctx context.Context) ([]FileChange, error)
 
 	// Push writes the local staging directory to the remote.
 	Push(ctx context.Context, msg string) error

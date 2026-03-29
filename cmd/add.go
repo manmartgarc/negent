@@ -13,26 +13,27 @@ import (
 
 var addCmd = &cobra.Command{
 	Use:   "add <agent>",
-	Short: "Register an agent for syncing",
-	Long:  `Add a new AI assistant agent to sync. Detects the agent's config directory and configures default sync types.`,
+	Short: "Add another agent to an existing negent setup",
+	Long:  `Add a new AI assistant agent after the initial negent setup. Detects the agent's config directory and configures sync types.`,
 	Args:  cobra.ExactArgs(1),
 	RunE:  runAdd,
 }
 
 var addSourceFlag string
+var addSyncFlags []string
+var addNonInteractiveFlag bool
 
 func init() {
 	addCmd.Flags().StringVar(&addSourceFlag, "source", "", "override the agent's source directory")
+	addCmd.Flags().StringSliceVar(&addSyncFlags, "sync", nil, "sync type to enable (repeatable)")
+	addCmd.Flags().BoolVar(&addNonInteractiveFlag, "non-interactive", false, "disable prompts and require flags/defaults")
 	rootCmd.AddCommand(addCmd)
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
 	agentName := args[0]
 
-	cfgPath := cfgFile
-	if cfgPath == "" {
-		cfgPath = config.DefaultPath()
-	}
+	cfgPath := resolveConfigPath()
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -65,25 +66,23 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	var selectedCats []string
-	if ag, err := newAgent(agentName, sourceDir, nil); err == nil {
-		// Agent has a full implementation — offer interactive sync type selection.
-		defaults := defaultSyncTypeStrings(ag)
-		allSyncTypes := syncTypeOptions(ag)
-
-		var options []huh.Option[string]
-		for _, syncType := range allSyncTypes {
-			options = append(options, huh.NewOption(syncType, syncType))
-		}
-
-		selectedCats = make([]string, len(defaults))
-		copy(selectedCats, defaults)
-
-		if err := huh.NewMultiSelect[string]().
-			Title(fmt.Sprintf("Select sync types for %s", agentName)).
-			Options(options...).
-			Value(&selectedCats).
-			Run(); err != nil {
-			return err
+	if len(addSyncFlags) > 0 {
+		selectedCats = append([]string(nil), addSyncFlags...)
+	} else if ag, err := newAgent(agentName, sourceDir, nil); err == nil {
+		selectedCats = defaultSyncTypeStrings(ag)
+		if !addNonInteractiveFlag {
+			allSyncTypes := syncTypeOptions(ag)
+			var options []huh.Option[string]
+			for _, syncType := range allSyncTypes {
+				options = append(options, huh.NewOption(syncType, syncType))
+			}
+			if err := huh.NewMultiSelect[string]().
+				Title(fmt.Sprintf("Select sync types for %s", agentName)).
+				Options(options...).
+				Value(&selectedCats).
+				Run(); err != nil {
+				return err
+			}
 		}
 	}
 

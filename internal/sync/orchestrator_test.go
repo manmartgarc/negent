@@ -18,7 +18,7 @@ type mockBackend struct {
 	pulled       bool
 	fetched      bool
 	lastMsg      string
-	fetchedFiles []string // files to return from FetchedFiles()
+	fetchedFiles []backend.FileChange
 }
 
 func newMockBackend(t *testing.T) *mockBackend {
@@ -30,7 +30,7 @@ func (m *mockBackend) Fetch(_ context.Context) error {
 	m.fetched = true
 	return nil
 }
-func (m *mockBackend) FetchedFiles(_ context.Context) ([]string, error) {
+func (m *mockBackend) FetchedFiles(_ context.Context) ([]backend.FileChange, error) {
 	return m.fetchedFiles, nil
 }
 func (m *mockBackend) Push(_ context.Context, msg string) error {
@@ -117,7 +117,7 @@ func (m *mockAgent) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backe
 }
 func (m *mockAgent) SyncTypeForPath(relPath string) agent.SyncType {
 	switch {
-	case relPath == "CLAUDE.md":
+	case relPath == "CLAUDE.md", strings.HasSuffix(relPath, ".md"):
 		return mockTypeClaudeMD
 	case strings.HasSuffix(relPath, ".jsonl"):
 		return mockTypeSessions
@@ -285,6 +285,93 @@ func TestPullNewRemoteFile(t *testing.T) {
 	// No local file → no conflict → safe to place.
 	if !placed["CLAUDE.md"] {
 		t.Error("CLAUDE.md should be placed (newly added by remote, no local conflict)")
+	}
+}
+
+func TestPlanCombinesLocalAndRemoteChanges(t *testing.T) {
+	be := newMockBackend(t)
+	be.fetchedFiles = []backend.FileChange{
+		{Path: "claude/CLAUDE.md", Kind: backend.ChangeModified},
+		{Path: "claude/new.md", Kind: backend.ChangeAdded},
+		{Path: "claude/gone.md", Kind: backend.ChangeDeleted},
+	}
+
+	agentDir := filepath.Join(be.StagingDir(), "claude")
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("base"), 0o644)
+	os.WriteFile(filepath.Join(agentDir, "old.md"), []byte("staged"), 0o644)
+
+	files := []agent.SyncFile{
+		{RelPath: "CLAUDE.md", StagingPath: "CLAUDE.md", Type: mockTypeClaudeMD},
+	}
+	ag := newMockAgent(t, "claude", files)
+	os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("local edits"), 0o644)
+
+	orch := NewOrchestrator(be, map[string]agent.Agent{"claude": ag})
+	plan, err := orch.Plan(context.Background(), map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+
+	if be.fetched {
+		t.Fatal("Plan should not fetch remote state; callers own freshness")
+	}
+
+	if len(plan.Local) != 1 {
+		t.Fatalf("local changes = %d, want 1", len(plan.Local))
+	}
+	if plan.Local[0].Action != ActionDeleteRemote || plan.Local[0].Path != "old.md" {
+		t.Fatalf("local change = %+v, want delete-remote old.md", plan.Local[0])
+	}
+
+	if len(plan.Remote) != 2 {
+		t.Fatalf("remote changes = %d, want 2", len(plan.Remote))
+	}
+
+	got := map[string]PlanAction{}
+	for _, ch := range plan.Remote {
+		got[ch.Path] = ch.Action
+	}
+	if got["CLAUDE.md"] != ActionConflict {
+		t.Errorf("CLAUDE.md action = %q, want %q", got["CLAUDE.md"], ActionConflict)
+	}
+	if got["new.md"] != ActionDownload {
+		t.Errorf("new.md action = %q, want %q", got["new.md"], ActionDownload)
+	}
+	if _, ok := got["gone.md"]; ok {
+		t.Errorf("gone.md should be omitted from preview because pull does not delete local files")
+	}
+}
+
+func TestPlanTreatsProjectFilesAsDownloads(t *testing.T) {
+	be := newMockBackend(t)
+	be.fetchedFiles = []backend.FileChange{
+		{Path: "claude/projects/myapp/memory/MEMORY.md", Kind: backend.ChangeModified},
+	}
+
+	agentDir := filepath.Join(be.StagingDir(), "claude", "projects", "myapp", "memory")
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "MEMORY.md"), []byte("remote"), 0o644)
+
+	ag := newMockAgent(t, "claude", nil)
+	localProjectDir := filepath.Join(ag.SourceDir(), "projects", "myapp", "memory")
+	os.MkdirAll(localProjectDir, 0o755)
+	os.WriteFile(filepath.Join(localProjectDir, "MEMORY.md"), []byte("local edits"), 0o644)
+
+	orch := NewOrchestrator(be, map[string]agent.Agent{"claude": ag})
+	plan, err := orch.Plan(context.Background(), map[string][]agent.SyncType{"claude": {mockTypeClaudeMD, mockTypeSessions}})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+
+	if len(plan.Remote) != 1 {
+		t.Fatalf("remote changes = %d, want 1", len(plan.Remote))
+	}
+	if plan.Remote[0].Path != "projects/myapp/memory/MEMORY.md" {
+		t.Fatalf("remote path = %q, want project memory path", plan.Remote[0].Path)
+	}
+	if plan.Remote[0].Action != ActionDownload {
+		t.Fatalf("remote action = %q, want %q", plan.Remote[0].Action, ActionDownload)
 	}
 }
 

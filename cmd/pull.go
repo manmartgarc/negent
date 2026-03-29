@@ -17,15 +17,15 @@ var pullCmd = &cobra.Command{
 	RunE:  runPull,
 }
 
+var pullDryRunFlag bool
+
 func init() {
+	pullCmd.Flags().BoolVar(&pullDryRunFlag, "dry-run", false, "preview pull changes without writing local files")
 	rootCmd.AddCommand(pullCmd)
 }
 
 func runPull(cmd *cobra.Command, args []string) error {
-	cfgPath := cfgFile
-	if cfgPath == "" {
-		cfgPath = config.DefaultPath()
-	}
+	cfgPath := resolveConfigPath()
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -43,6 +43,19 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	orch := sync.NewOrchestrator(be, agents)
+
+	if pullDryRunFlag {
+		if err := be.Fetch(context.Background()); err != nil {
+			return fmt.Errorf("pull preview failed: fetching backend: %w", err)
+		}
+		plan, err := orch.Plan(context.Background(), syncTypes)
+		if err != nil {
+			return fmt.Errorf("pull preview failed: %w", err)
+		}
+		printPlanSummary(plan)
+		printPlannedChanges("Pull preview:", plan.Remote)
+		return nil
+	}
 
 	fmt.Println("Pulling...")
 	if err := orch.Pull(context.Background(), syncTypes); err != nil {

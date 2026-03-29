@@ -112,24 +112,39 @@ func (g *Git) Fetch(ctx context.Context) error {
 	return g.run(ctx, g.stagingDir, "fetch", "origin")
 }
 
-func (g *Git) FetchedFiles(ctx context.Context) ([]string, error) {
+func (g *Git) FetchedFiles(ctx context.Context) ([]backend.FileChange, error) {
 	// If no fetch has been done, FETCH_HEAD won't exist.
 	fetchHeadPath := filepath.Join(g.stagingDir, ".git", "FETCH_HEAD")
 	if _, err := os.Stat(fetchHeadPath); os.IsNotExist(err) {
 		return nil, nil
 	}
-	out, err := g.runner(ctx, g.stagingDir, "diff", "--name-only", "HEAD", "FETCH_HEAD")
+	out, err := g.runner(ctx, g.stagingDir, "diff", "--name-status", "HEAD", "FETCH_HEAD")
 	if err != nil {
 		// Gracefully handle empty repo or identical refs.
 		return nil, nil
 	}
-	var files []string
+	var changes []backend.FileChange
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line != "" {
-			files = append(files, line)
+		if strings.TrimSpace(line) == "" {
+			continue
 		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		kind := backend.ChangeModified
+		switch fields[0] {
+		case "A":
+			kind = backend.ChangeAdded
+		case "D":
+			kind = backend.ChangeDeleted
+		}
+		changes = append(changes, backend.FileChange{
+			Path: fields[len(fields)-1],
+			Kind: kind,
+		})
 	}
-	return files, nil
+	return changes, nil
 }
 
 func (g *Git) Pull(ctx context.Context) error {

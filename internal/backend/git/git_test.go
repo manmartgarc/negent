@@ -221,6 +221,36 @@ func TestFetchSendsFetchOrigin(t *testing.T) {
 	assertCall(t, fr.calls[1], "/staging", "fetch", "origin")
 }
 
+func TestFetchedFilesParsesOutput(t *testing.T) {
+	fr := &fakeRunner{responses: []fakeResp{okResp("A new.txt\nM existing.txt\nD removed.txt\n")}}
+	staging := t.TempDir()
+	os.MkdirAll(filepath.Join(staging, ".git"), 0o755)
+	os.WriteFile(filepath.Join(staging, ".git", "FETCH_HEAD"), []byte("fetched"), 0o644)
+	g := &Git{stagingDir: staging, runner: fr.run}
+
+	changes, err := g.FetchedFiles(context.Background())
+	if err != nil {
+		t.Fatalf("FetchedFiles: %v", err)
+	}
+
+	assertCall(t, fr.calls[0], staging, "diff", "--name-status", "HEAD", "FETCH_HEAD")
+
+	byPath := make(map[string]backend.ChangeKind)
+	for _, c := range changes {
+		byPath[c.Path] = c.Kind
+	}
+
+	if byPath["new.txt"] != backend.ChangeAdded {
+		t.Errorf("new.txt kind = %v, want added", byPath["new.txt"])
+	}
+	if byPath["existing.txt"] != backend.ChangeModified {
+		t.Errorf("existing.txt kind = %v, want modified", byPath["existing.txt"])
+	}
+	if byPath["removed.txt"] != backend.ChangeDeleted {
+		t.Errorf("removed.txt kind = %v, want deleted", byPath["removed.txt"])
+	}
+}
+
 func TestFetchSkipsEmptyRepo(t *testing.T) {
 	fr := &fakeRunner{responses: []fakeResp{
 		errResp("no HEAD"),
@@ -301,7 +331,7 @@ func TestFetchedFilesReturnsChangedFiles(t *testing.T) {
 	os.MkdirAll(filepath.Join(staging, ".git"), 0o755)
 	os.WriteFile(filepath.Join(staging, ".git", "FETCH_HEAD"), []byte("abc123"), 0o644)
 
-	fr := &fakeRunner{responses: []fakeResp{okResp("changed.txt\nother.txt\n")}}
+	fr := &fakeRunner{responses: []fakeResp{okResp("M changed.txt\nA other.txt\n")}}
 	g := &Git{stagingDir: staging, runner: fr.run}
 
 	files, err := g.FetchedFiles(context.Background())
@@ -309,9 +339,12 @@ func TestFetchedFilesReturnsChangedFiles(t *testing.T) {
 		t.Fatalf("FetchedFiles: %v", err)
 	}
 
-	assertCall(t, fr.calls[0], staging, "diff", "--name-only", "HEAD", "FETCH_HEAD")
+	assertCall(t, fr.calls[0], staging, "diff", "--name-status", "HEAD", "FETCH_HEAD")
 
-	want := []string{"changed.txt", "other.txt"}
+	want := []backend.FileChange{
+		{Path: "changed.txt", Kind: backend.ChangeModified},
+		{Path: "other.txt", Kind: backend.ChangeAdded},
+	}
 	if !slices.Equal(files, want) {
 		t.Errorf("FetchedFiles = %v, want %v", files, want)
 	}

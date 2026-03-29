@@ -35,6 +35,7 @@ const (
 	SyncTypeCommands    agent.SyncType = "commands"
 	SyncTypeSkills      agent.SyncType = "skills"
 	SyncTypeAgents      agent.SyncType = "agents"
+	SyncTypePlugins     agent.SyncType = "plugins"
 	SyncTypeOutputStyle agent.SyncType = "output-styles"
 	SyncTypeAgentMemory agent.SyncType = "agent-memory"
 	SyncTypeAutoMemory  agent.SyncType = "auto-memory"
@@ -49,6 +50,7 @@ var syncTypeSpecs = []agent.SyncTypeSpec{
 	{ID: SyncTypeCommands, Label: "Commands", Description: "Reusable prompts in commands/.", Group: "prompts", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
 	{ID: SyncTypeSkills, Label: "Skills", Description: "Skills in skills/<name>/.", Group: "prompts", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
 	{ID: SyncTypeAgents, Label: "Subagents", Description: "Subagent definitions in agents/.", Group: "prompts", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypePlugins, Label: "Plugins", Description: "Claude plugins in plugins/.", Group: "prompts", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
 	{ID: SyncTypeOutputStyle, Label: "Output styles", Description: "Custom output styles in output-styles/.", Group: "prompts", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
 	{ID: SyncTypeAgentMemory, Label: "Agent memory", Description: "Persistent subagent memory in agent-memory/.", Group: "memory", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
 	{ID: SyncTypeAutoMemory, Label: "Auto memory", Description: "Project auto-memory in projects/*/memory/.", Group: "memory", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
@@ -72,6 +74,9 @@ var syncTypeRules = map[agent.SyncType][]collectionRule{
 	},
 	SyncTypeAgents: {
 		{Dir: "agents"},
+	},
+	SyncTypePlugins: {
+		{Dir: "plugins"},
 	},
 	SyncTypeOutputStyle: {
 		{Dir: "output-styles"},
@@ -99,7 +104,7 @@ var legacySyncTypeAliases = map[string][]agent.SyncType{
 	"memory":      {SyncTypeAgentMemory, SyncTypeAutoMemory},
 	"sessions":    {SyncTypeSessions},
 	"history":     {SyncTypeHistory},
-	"plugins":     {}, // legacy no-op; previously selectable but never collected
+	"plugins":     {SyncTypePlugins},
 }
 
 // excludePatterns are always excluded from sync.
@@ -123,7 +128,6 @@ var excludeDirs = map[string]bool{
 	"ide":             true,
 	"paste-cache":     true,
 	"plans":           true,
-	"plugins":         true,
 	"session-env":     true,
 	"sessions":        true,
 	"shell-snapshots": true,
@@ -386,7 +390,6 @@ func (c *Claude) Place(stagingDir string, files []agent.SyncFile) (*agent.PlaceR
 
 	return result, nil
 }
-
 
 // matchProject implements the 4-tier matching algorithm.
 // Returns the local encoded directory name and whether a match was found.
@@ -794,6 +797,8 @@ func syncTypeForPath(relPath string) agent.SyncType {
 		return SyncTypeSkills
 	case strings.HasPrefix(relPath, "agents/"):
 		return SyncTypeAgents
+	case strings.HasPrefix(relPath, "plugins/"):
+		return SyncTypePlugins
 	case strings.HasPrefix(relPath, "rules/"):
 		return SyncTypeRules
 	case strings.HasPrefix(relPath, "output-styles/"):

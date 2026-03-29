@@ -37,6 +37,7 @@ func TestDefaultSyncTypes(t *testing.T) {
 		SyncTypeCommands:    true,
 		SyncTypeSkills:      true,
 		SyncTypeAgents:      true,
+		SyncTypePlugins:     true,
 		SyncTypeOutputStyle: true,
 		SyncTypeAgentMemory: true,
 		SyncTypeAutoMemory:  true,
@@ -114,8 +115,14 @@ func TestNormalizeSyncTypesPluginsLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormalizeSyncTypes(plugins) returned error: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("NormalizeSyncTypes(plugins) returned %d types, want 0 (no-op alias)", len(got))
+	if len(got) != 1 || got[0] != SyncTypePlugins {
+		t.Fatalf("NormalizeSyncTypes(plugins) = %v, want [%q]", got, SyncTypePlugins)
+	}
+}
+
+func TestSyncTypeForPathIncludesPlugins(t *testing.T) {
+	if got := syncTypeForPath("plugins/my-plugin/plugin.json"); got != SyncTypePlugins {
+		t.Fatalf("syncTypeForPath(plugins/...) = %q, want %q", got, SyncTypePlugins)
 	}
 }
 
@@ -139,6 +146,8 @@ func setupTestDir(t *testing.T) string {
 	// Custom code
 	os.MkdirAll(filepath.Join(dir, "skills", "my-skill"), 0o755)
 	writeFile(t, filepath.Join(dir, "skills", "my-skill", "skill.md"), "# Skill")
+	os.MkdirAll(filepath.Join(dir, "plugins", "my-plugin"), 0o755)
+	writeFile(t, filepath.Join(dir, "plugins", "my-plugin", "plugin.json"), `{"name":"my-plugin"}`)
 
 	// Memory (project dirs)
 	projDir := filepath.Join(dir, "projects", "-home-user-repos-myproject")
@@ -278,6 +287,7 @@ func TestCollectExcludes(t *testing.T) {
 		SyncTypeCommands,
 		SyncTypeSkills,
 		SyncTypeAgents,
+		SyncTypePlugins,
 		SyncTypeOutputStyle,
 		SyncTypeAgentMemory,
 		SyncTypeAutoMemory,

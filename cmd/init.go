@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
 	"github.com/manmart/negent/internal/agent"
@@ -14,128 +13,103 @@ import (
 	"github.com/manmart/negent/internal/config"
 )
 
+var (
+	initBackendFlag        string
+	initRepoFlag           string
+	initMachineFlag        string
+	initAgentsFlag         []string
+	initNonInteractiveFlag bool
+)
+
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize negent on this machine",
-	Long:  `Interactive first-time setup: configure backend, machine name, and agents to sync.`,
+	Long:  `First-time setup: configure backend, machine name, and the agents to sync on this machine.`,
 	RunE:  runInit,
 }
 
 func init() {
+	initCmd.Flags().StringVar(&initBackendFlag, "backend", "", "backend type to configure")
+	initCmd.Flags().StringVar(&initRepoFlag, "repo", "", "remote repository URL")
+	initCmd.Flags().StringVar(&initMachineFlag, "machine", "", "machine name")
+	initCmd.Flags().StringSliceVar(&initAgentsFlag, "agent", nil, "agent to configure (repeatable)")
+	initCmd.Flags().BoolVar(&initNonInteractiveFlag, "non-interactive", false, "disable prompts and require flags/defaults")
 	rootCmd.AddCommand(initCmd)
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	cfgPath := cfgFile
-	if cfgPath == "" {
-		cfgPath = config.DefaultPath()
-	}
+	cfgPath := resolveConfigPath()
 
 	if config.Exists(cfgPath) {
 		return fmt.Errorf("config already exists at %s — use 'negent add' to add agents, or delete the config to re-init", cfgPath)
 	}
 
-	// Step 1: Backend selection
-	var backendType string
-	err := huh.NewSelect[string]().
-		Title("Backend type").
-		Options(
-			huh.NewOption("git", "git"),
-		).
-		Value(&backendType).
-		Run()
-	if err != nil {
-		return err
-	}
-
-	// Step 2: Backend-specific config
-	var remoteURL string
-	if backendType == "git" {
-		err = huh.NewInput().
-			Title("Git remote URL").
-			Placeholder("git@github.com:user/negent-sync.git").
-			Value(&remoteURL).
-			Validate(func(s string) error {
-				if s == "" {
-					return fmt.Errorf("remote URL is required")
-				}
-				return nil
-			}).
-			Run()
+	backendType := initBackendFlag
+	var err error
+	if backendType == "" && !initNonInteractiveFlag {
+		backendType, err = promptBackendType("git")
 		if err != nil {
 			return err
 		}
 	}
-
-	// Step 3: Machine name
-	hostname, _ := os.Hostname()
-	machineName := hostname
-	err = huh.NewInput().
-		Title("Machine name").
-		Value(&machineName).
-		Validate(func(s string) error {
-			if s == "" {
-				return fmt.Errorf("machine name is required")
-			}
-			return nil
-		}).
-		Run()
-	if err != nil {
-		return err
+	if backendType == "" {
+		backendType = "git"
 	}
 
-	// Step 4: Agent detection
+	remoteURL := initRepoFlag
+	if backendType == "git" {
+		if remoteURL == "" && !initNonInteractiveFlag {
+			remoteURL, err = promptRepoURL("")
+			if err != nil {
+				return err
+			}
+		}
+		if remoteURL == "" {
+			return fmt.Errorf("--repo is required in non-interactive mode")
+		}
+	}
+
+	hostname, _ := os.Hostname()
+	machineName := initMachineFlag
+	if machineName == "" && !initNonInteractiveFlag {
+		machineName, err = promptMachineName(hostname)
+		if err != nil {
+			return err
+		}
+	}
+	if machineName == "" {
+		machineName = hostname
+	}
+
 	detected := agent.DetectAgents()
 	if len(detected) == 0 {
 		fmt.Println("No known AI assistant configs detected. You can add agents later with 'negent add'.")
 	}
 
-	var selectedAgents []string
-	if len(detected) > 0 {
-		var options []huh.Option[string]
-		for _, a := range detected {
-			label := fmt.Sprintf("%s (%s)", a.Name, a.SourceDir)
-			options = append(options, huh.NewOption(label, a.Name))
-		}
-
-		err = huh.NewMultiSelect[string]().
-			Title("Detected agents — which to sync?").
-			Options(options...).
-			Value(&selectedAgents).
-			Run()
+	selectedAgents := append([]string(nil), initAgentsFlag...)
+	if len(selectedAgents) == 0 {
+		selectedAgents = defaultSelectedAgents(nil, detected)
+	}
+	if !initNonInteractiveFlag {
+		selectedAgents, err = selectAgentsInteractive(detected, selectedAgents)
 		if err != nil {
 			return err
 		}
 	}
 
-	// Step 5: Build config
+	detectedMap := detectedAgentsMap()
+	agentConfigs, err := buildAgentConfigs(selectedAgents, detectedMap, nil, !initNonInteractiveFlag)
+	if err != nil {
+		return err
+	}
+
 	cfg := &config.Config{
 		Backend: backendType,
 		Repo:    remoteURL,
 		Machine: machineName,
-		Agents:  make(map[string]config.AgentConfig),
+		Agents:  agentConfigs,
 	}
 
-	// For each selected agent, use agent-defined default sync types.
-	for _, name := range selectedAgents {
-		var src string
-		for _, ka := range detected {
-			if ka.Name == name {
-				src = ka.SourceDir
-				break
-			}
-		}
-		var syncDefaults []string
-		if ag, err := newAgent(name, src, nil); err == nil {
-			syncDefaults = defaultSyncTypeStrings(ag)
-		}
-		cfg.Agents[name] = config.AgentConfig{
-			Source: src,
-			Sync:   syncDefaults,
-		}
-	}
-
-	// Step 6: Initialize backend and verify access
 	var be backend.Backend
 	switch backendType {
 	case "git":
@@ -149,19 +123,17 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("backend init failed: %w", err)
 	}
 
-	// Step 7: Write config
 	if err := config.Save(cfg, cfgPath); err != nil {
 		return fmt.Errorf("saving config: %w", err)
 	}
 
-	// Step 8: Summary
 	fmt.Printf("\n✓ Config written to %s\n", cfgPath)
 	fmt.Printf("✓ Backend: %s\n", backendType)
 	fmt.Printf("✓ Machine: %s\n", machineName)
 	if len(selectedAgents) > 0 {
 		fmt.Printf("✓ Agents: %v\n", selectedAgents)
 	}
-	fmt.Println("✓ Initial pull complete")
+	fmt.Printf("Next: %s\n", nextSuggestedCommand(be.StagingDir()))
 
 	return nil
 }
