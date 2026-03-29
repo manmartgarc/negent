@@ -14,10 +14,15 @@ import (
 
 const BackendName = "git"
 
+// runnerFn executes a git subcommand in dir and returns combined output.
+// Injected into Git so tests can verify outgoing commands without running git.
+type runnerFn func(ctx context.Context, dir string, args ...string) ([]byte, error)
+
 // Git implements backend.Backend using a local git clone.
 type Git struct {
 	remote     string
 	stagingDir string
+	runner     runnerFn
 }
 
 // New creates a new Git backend. The stagingDir is where the repo will be
@@ -26,7 +31,21 @@ func New(remote, stagingDir string) *Git {
 	return &Git{
 		remote:     remote,
 		stagingDir: stagingDir,
+		runner:     gitExec,
 	}
+}
+
+// gitExec is the production runner that shells out to the git CLI.
+func gitExec(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return out, fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, out)
+	}
+	return out, nil
 }
 
 // DefaultStagingDir returns the default location for the git working copy.
@@ -101,9 +120,7 @@ func (g *Git) FetchedFiles(ctx context.Context) ([]string, error) {
 	if _, err := os.Stat(fetchHeadPath); os.IsNotExist(err) {
 		return nil, nil
 	}
-	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", "HEAD", "FETCH_HEAD")
-	cmd.Dir = g.stagingDir
-	out, err := cmd.Output()
+	out, err := g.runner(ctx, g.stagingDir, "diff", "--name-only", "HEAD", "FETCH_HEAD")
 	if err != nil {
 		// Gracefully handle empty repo or identical refs.
 		return nil, nil
@@ -126,9 +143,7 @@ func (g *Git) Pull(ctx context.Context) error {
 }
 
 func (g *Git) Status(ctx context.Context) ([]backend.FileChange, error) {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
-	cmd.Dir = g.stagingDir
-	out, err := cmd.Output()
+	out, err := g.runner(ctx, g.stagingDir, "status", "--porcelain")
 	if err != nil {
 		return nil, fmt.Errorf("git status: %w", err)
 	}
@@ -162,15 +177,8 @@ func (g *Git) StagingDir() string {
 	return g.stagingDir
 }
 
-// run executes a git command with the given arguments.
+// run executes a git subcommand, discarding output bytes.
 func (g *Git) run(ctx context.Context, dir string, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, out)
-	}
-	return nil
+	_, err := g.runner(ctx, dir, args...)
+	return err
 }

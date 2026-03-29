@@ -2,290 +2,56 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/manmart/negent/internal/backend"
 )
 
-// initBareRepo creates a bare git repo to act as a "remote" for tests.
-func initBareRepo(t *testing.T) string {
+// --- fake runner infrastructure ---
+
+type call struct {
+	dir  string
+	args []string
+}
+
+type fakeRunner struct {
+	calls     []call
+	responses []fakeResp
+}
+
+type fakeResp struct {
+	out []byte
+	err error
+}
+
+func (f *fakeRunner) run(_ context.Context, dir string, args ...string) ([]byte, error) {
+	f.calls = append(f.calls, call{dir: dir, args: args})
+	if len(f.responses) > 0 {
+		r := f.responses[0]
+		f.responses = f.responses[1:]
+		return r.out, r.err
+	}
+	return nil, nil
+}
+
+func okResp(out string) fakeResp  { return fakeResp{out: []byte(out)} }
+func errResp(msg string) fakeResp { return fakeResp{err: errors.New(msg)} }
+
+func assertCall(t *testing.T, c call, wantDir string, wantArgs ...string) {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "remote.git")
-	run(t, "", "git", "init", "--bare", dir)
-	return dir
-}
-
-// run is a test helper to execute a command.
-func run(t *testing.T, dir string, name string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command(name, args...)
-	if dir != "" {
-		cmd.Dir = dir
+	if c.dir != wantDir {
+		t.Errorf("dir = %q, want %q", c.dir, wantDir)
 	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("%s %v failed: %v\n%s", name, args, err, out)
-	}
-	return string(out)
-}
-
-func TestInitClonesRepo(t *testing.T) {
-	remote := initBareRepo(t)
-	staging := filepath.Join(t.TempDir(), "staging")
-
-	g := New(remote, staging)
-	err := g.Init(context.Background(), backend.BackendConfig{"remote": remote})
-	if err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-
-	// Verify .git directory was created
-	if _, err := os.Stat(filepath.Join(staging, ".git")); os.IsNotExist(err) {
-		t.Error("staging dir was not cloned")
+	if !slices.Equal(c.args, wantArgs) {
+		t.Errorf("args = %v, want %v", c.args, wantArgs)
 	}
 }
 
-func TestInitPullsIfAlreadyCloned(t *testing.T) {
-	remote := initBareRepo(t)
-	staging := filepath.Join(t.TempDir(), "staging")
-
-	g := New(remote, staging)
-	err := g.Init(context.Background(), backend.BackendConfig{"remote": remote})
-	if err != nil {
-		t.Fatalf("first Init: %v", err)
-	}
-
-	// Second init should pull (not re-clone)
-	err = g.Init(context.Background(), backend.BackendConfig{"remote": remote})
-	if err != nil {
-		t.Fatalf("second Init: %v", err)
-	}
-}
-
-func TestInitRequiresRemote(t *testing.T) {
-	staging := filepath.Join(t.TempDir(), "staging")
-	g := New("", staging)
-	err := g.Init(context.Background(), backend.BackendConfig{})
-	if err == nil {
-		t.Fatal("expected error for empty remote")
-	}
-}
-
-func TestStagingDir(t *testing.T) {
-	g := New("some-remote", "/tmp/test-staging")
-	if g.StagingDir() != "/tmp/test-staging" {
-		t.Errorf("StagingDir = %q, want /tmp/test-staging", g.StagingDir())
-	}
-}
-
-func TestPushAndPull(t *testing.T) {
-	remote := initBareRepo(t)
-	staging := filepath.Join(t.TempDir(), "staging")
-
-	g := New(remote, staging)
-	ctx := context.Background()
-
-	if err := g.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-
-	// Create a file in staging
-	os.WriteFile(filepath.Join(staging, "test.txt"), []byte("hello"), 0o644)
-
-	// Push
-	if err := g.Push(ctx, "test commit"); err != nil {
-		t.Fatalf("Push: %v", err)
-	}
-
-	// Clone into a second staging dir to verify the push landed
-	staging2 := filepath.Join(t.TempDir(), "staging2")
-	g2 := New(remote, staging2)
-	if err := g2.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
-		t.Fatalf("Init staging2: %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(staging2, "test.txt"))
-	if err != nil {
-		t.Fatalf("reading pushed file: %v", err)
-	}
-	if string(data) != "hello" {
-		t.Errorf("file content = %q, want %q", data, "hello")
-	}
-}
-
-func TestPushNoChanges(t *testing.T) {
-	remote := initBareRepo(t)
-	staging := filepath.Join(t.TempDir(), "staging")
-
-	g := New(remote, staging)
-	ctx := context.Background()
-
-	if err := g.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-
-	// Push with nothing to commit should succeed silently
-	if err := g.Push(ctx, "empty"); err != nil {
-		t.Fatalf("Push with no changes: %v", err)
-	}
-}
-
-func TestStatusDetectsChanges(t *testing.T) {
-	remote := initBareRepo(t)
-	staging := filepath.Join(t.TempDir(), "staging")
-
-	g := New(remote, staging)
-	ctx := context.Background()
-
-	if err := g.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-
-	// Push an initial file
-	os.WriteFile(filepath.Join(staging, "existing.txt"), []byte("v1"), 0o644)
-	if err := g.Push(ctx, "initial"); err != nil {
-		t.Fatalf("Push: %v", err)
-	}
-
-	// Create changes: modify existing, add new
-	os.WriteFile(filepath.Join(staging, "existing.txt"), []byte("v2"), 0o644)
-	os.WriteFile(filepath.Join(staging, "new.txt"), []byte("new"), 0o644)
-
-	changes, err := g.Status(ctx)
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-
-	if len(changes) != 2 {
-		t.Fatalf("expected 2 changes, got %d", len(changes))
-	}
-
-	found := make(map[string]backend.ChangeKind)
-	for _, c := range changes {
-		found[c.Path] = c.Kind
-	}
-
-	if found["existing.txt"] != backend.ChangeModified {
-		t.Errorf("existing.txt kind = %q, want modified", found["existing.txt"])
-	}
-	if found["new.txt"] != backend.ChangeAdded {
-		t.Errorf("new.txt kind = %q, want added", found["new.txt"])
-	}
-}
-
-func TestFetchEmptyRemote(t *testing.T) {
-	remote := initBareRepo(t)
-	staging := filepath.Join(t.TempDir(), "staging")
-
-	g := New(remote, staging)
-	ctx := context.Background()
-	if err := g.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-
-	// Fetch on an empty repo should succeed without error.
-	if err := g.Fetch(ctx); err != nil {
-		t.Fatalf("Fetch on empty repo: %v", err)
-	}
-}
-
-func TestFetchedFilesNoneBeforeFetch(t *testing.T) {
-	remote := initBareRepo(t)
-	staging := filepath.Join(t.TempDir(), "staging")
-
-	g := New(remote, staging)
-	ctx := context.Background()
-	if err := g.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-
-	// No fetch done → no FETCH_HEAD → empty result.
-	files, err := g.FetchedFiles(ctx)
-	if err != nil {
-		t.Fatalf("FetchedFiles: %v", err)
-	}
-	if len(files) != 0 {
-		t.Errorf("expected 0 fetched files before fetch, got %d: %v", len(files), files)
-	}
-}
-
-func TestFetchedFilesDetectsChanges(t *testing.T) {
-	remote := initBareRepo(t)
-	staging1 := filepath.Join(t.TempDir(), "staging1")
-	staging2 := filepath.Join(t.TempDir(), "staging2")
-	ctx := context.Background()
-
-	// Machine A: clone and push two files.
-	g1 := New(remote, staging1)
-	if err := g1.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
-		t.Fatalf("Init g1: %v", err)
-	}
-	os.WriteFile(filepath.Join(staging1, "changed.txt"), []byte("v1"), 0o644)
-	os.WriteFile(filepath.Join(staging1, "unchanged.txt"), []byte("same"), 0o644)
-	if err := g1.Push(ctx, "initial"); err != nil {
-		t.Fatalf("Push g1 initial: %v", err)
-	}
-
-	// Machine B: clone.
-	g2 := New(remote, staging2)
-	if err := g2.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
-		t.Fatalf("Init g2: %v", err)
-	}
-
-	// Machine A: update only changed.txt and push.
-	os.WriteFile(filepath.Join(staging1, "changed.txt"), []byte("v2"), 0o644)
-	if err := g1.Push(ctx, "update changed.txt"); err != nil {
-		t.Fatalf("Push g1 update: %v", err)
-	}
-
-	// Machine B: fetch (not pull) — working tree still at v1.
-	if err := g2.Fetch(ctx); err != nil {
-		t.Fatalf("Fetch g2: %v", err)
-	}
-
-	files, err := g2.FetchedFiles(ctx)
-	if err != nil {
-		t.Fatalf("FetchedFiles: %v", err)
-	}
-
-	if len(files) != 1 {
-		t.Fatalf("expected 1 fetched file, got %d: %v", len(files), files)
-	}
-	if files[0] != "changed.txt" {
-		t.Errorf("fetched file = %q, want %q", files[0], "changed.txt")
-	}
-}
-
-func TestFetchedFilesEmptyAfterUpToDate(t *testing.T) {
-	remote := initBareRepo(t)
-	staging := filepath.Join(t.TempDir(), "staging")
-
-	g := New(remote, staging)
-	ctx := context.Background()
-	if err := g.Init(ctx, backend.BackendConfig{"remote": remote}); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-
-	os.WriteFile(filepath.Join(staging, "file.txt"), []byte("hello"), 0o644)
-	if err := g.Push(ctx, "initial"); err != nil {
-		t.Fatalf("Push: %v", err)
-	}
-
-	// Fetch when already up to date → no fetched files.
-	if err := g.Fetch(ctx); err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	files, err := g.FetchedFiles(ctx)
-	if err != nil {
-		t.Fatalf("FetchedFiles: %v", err)
-	}
-	if len(files) != 0 {
-		t.Errorf("expected 0 fetched files when up to date, got %d: %v", len(files), files)
-	}
-}
+// --- tests ---
 
 func TestDefaultStagingDir(t *testing.T) {
 	dir := DefaultStagingDir()
@@ -294,5 +60,276 @@ func TestDefaultStagingDir(t *testing.T) {
 	}
 	if !filepath.IsAbs(dir) {
 		t.Errorf("DefaultStagingDir = %q, expected absolute path", dir)
+	}
+}
+
+func TestStagingDir(t *testing.T) {
+	g := &Git{stagingDir: "/tmp/test-staging"}
+	if g.StagingDir() != "/tmp/test-staging" {
+		t.Errorf("StagingDir = %q, want /tmp/test-staging", g.StagingDir())
+	}
+}
+
+func TestInitRequiresRemote(t *testing.T) {
+	fr := &fakeRunner{}
+	g := &Git{stagingDir: filepath.Join(t.TempDir(), "staging"), runner: fr.run}
+	if err := g.Init(context.Background(), backend.BackendConfig{}); err == nil {
+		t.Fatal("expected error for empty remote")
+	}
+	if len(fr.calls) != 0 {
+		t.Errorf("expected no git calls, got %d", len(fr.calls))
+	}
+}
+
+func TestInitClones(t *testing.T) {
+	// staging does not exist yet — should trigger clone
+	staging := filepath.Join(t.TempDir(), "staging")
+	fr := &fakeRunner{}
+	g := &Git{remote: "git@github.com:user/repo.git", stagingDir: staging, runner: fr.run}
+
+	if err := g.Init(context.Background(), backend.BackendConfig{}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	if len(fr.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d: %v", len(fr.calls), fr.calls)
+	}
+	assertCall(t, fr.calls[0], "", "clone", "git@github.com:user/repo.git", staging)
+}
+
+func TestInitConfigRemoteOverridesField(t *testing.T) {
+	staging := filepath.Join(t.TempDir(), "staging")
+	fr := &fakeRunner{}
+	g := &Git{remote: "old-remote", stagingDir: staging, runner: fr.run}
+
+	cfg := backend.BackendConfig{"remote": "new-remote"}
+	if err := g.Init(context.Background(), cfg); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	assertCall(t, fr.calls[0], "", "clone", "new-remote", staging)
+}
+
+func TestInitPullsIfAlreadyCloned(t *testing.T) {
+	staging := t.TempDir()
+	os.MkdirAll(filepath.Join(staging, ".git"), 0o755)
+
+	fr := &fakeRunner{responses: []fakeResp{
+		okResp("abc123\n"), // rev-parse HEAD
+		okResp(""),         // pull --rebase
+	}}
+	g := &Git{remote: "git@github.com:user/repo.git", stagingDir: staging, runner: fr.run}
+
+	if err := g.Init(context.Background(), backend.BackendConfig{}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	if len(fr.calls) != 2 {
+		t.Fatalf("expected 2 calls, got %d: %v", len(fr.calls), fr.calls)
+	}
+	assertCall(t, fr.calls[0], staging, "rev-parse", "HEAD")
+	assertCall(t, fr.calls[1], staging, "pull", "--rebase")
+}
+
+func TestPushSendsCommitAndPush(t *testing.T) {
+	fr := &fakeRunner{responses: []fakeResp{
+		okResp(""),          // add -A
+		errResp("has diff"), // diff --cached --quiet (non-zero = changes exist)
+		okResp(""),          // commit -m
+		okResp(""),          // push
+	}}
+	g := &Git{stagingDir: "/staging", runner: fr.run}
+
+	if err := g.Push(context.Background(), "test commit"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	if len(fr.calls) != 4 {
+		t.Fatalf("expected 4 calls, got %d", len(fr.calls))
+	}
+	assertCall(t, fr.calls[0], "/staging", "add", "-A")
+	assertCall(t, fr.calls[1], "/staging", "diff", "--cached", "--quiet")
+	assertCall(t, fr.calls[2], "/staging", "commit", "-m", "test commit")
+	assertCall(t, fr.calls[3], "/staging", "push")
+}
+
+func TestPushSkipsCommitWhenNothingStaged(t *testing.T) {
+	fr := &fakeRunner{responses: []fakeResp{
+		okResp(""), // add -A
+		okResp(""), // diff --cached --quiet → exit 0 means nothing staged
+	}}
+	g := &Git{stagingDir: "/staging", runner: fr.run}
+
+	if err := g.Push(context.Background(), "msg"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	if len(fr.calls) != 2 {
+		t.Fatalf("expected 2 calls (no commit/push), got %d: %v", len(fr.calls), fr.calls)
+	}
+}
+
+func TestPullSendsRebaseCommand(t *testing.T) {
+	fr := &fakeRunner{responses: []fakeResp{
+		okResp("abc123\n"), // rev-parse HEAD
+		okResp(""),         // pull --rebase
+	}}
+	g := &Git{stagingDir: "/staging", runner: fr.run}
+
+	if err := g.Pull(context.Background()); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+
+	if len(fr.calls) != 2 {
+		t.Fatalf("expected 2 calls, got %d", len(fr.calls))
+	}
+	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
+	assertCall(t, fr.calls[1], "/staging", "pull", "--rebase")
+}
+
+func TestPullSkipsEmptyRepo(t *testing.T) {
+	fr := &fakeRunner{responses: []fakeResp{
+		errResp("no HEAD"), // rev-parse HEAD fails on empty repo
+	}}
+	g := &Git{stagingDir: "/staging", runner: fr.run}
+
+	if err := g.Pull(context.Background()); err != nil {
+		t.Fatalf("Pull on empty repo should succeed, got: %v", err)
+	}
+
+	if len(fr.calls) != 1 {
+		t.Fatalf("expected 1 call (rev-parse only), got %d", len(fr.calls))
+	}
+	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
+}
+
+func TestFetchSendsFetchOrigin(t *testing.T) {
+	fr := &fakeRunner{responses: []fakeResp{
+		okResp("abc123\n"), // rev-parse HEAD
+		okResp(""),         // fetch origin
+	}}
+	g := &Git{stagingDir: "/staging", runner: fr.run}
+
+	if err := g.Fetch(context.Background()); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	if len(fr.calls) != 2 {
+		t.Fatalf("expected 2 calls, got %d", len(fr.calls))
+	}
+	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
+	assertCall(t, fr.calls[1], "/staging", "fetch", "origin")
+}
+
+func TestFetchSkipsEmptyRepo(t *testing.T) {
+	fr := &fakeRunner{responses: []fakeResp{
+		errResp("no HEAD"),
+	}}
+	g := &Git{stagingDir: "/staging", runner: fr.run}
+
+	if err := g.Fetch(context.Background()); err != nil {
+		t.Fatalf("Fetch on empty repo should succeed, got: %v", err)
+	}
+
+	if len(fr.calls) != 1 {
+		t.Fatalf("expected 1 call (rev-parse only), got %d", len(fr.calls))
+	}
+	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
+}
+
+func TestStatusParsesOutput(t *testing.T) {
+	porcelain := " M existing.txt\n?? new.txt\n D deleted.txt\n"
+	fr := &fakeRunner{responses: []fakeResp{okResp(porcelain)}}
+	g := &Git{stagingDir: "/staging", runner: fr.run}
+
+	changes, err := g.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+
+	assertCall(t, fr.calls[0], "/staging", "status", "--porcelain")
+
+	byPath := make(map[string]backend.ChangeKind)
+	for _, c := range changes {
+		byPath[c.Path] = c.Kind
+	}
+
+	if byPath["existing.txt"] != backend.ChangeModified {
+		t.Errorf("existing.txt: got %v, want modified", byPath["existing.txt"])
+	}
+	if byPath["new.txt"] != backend.ChangeAdded {
+		t.Errorf("new.txt: got %v, want added", byPath["new.txt"])
+	}
+	if byPath["deleted.txt"] != backend.ChangeDeleted {
+		t.Errorf("deleted.txt: got %v, want deleted", byPath["deleted.txt"])
+	}
+}
+
+func TestStatusEmpty(t *testing.T) {
+	fr := &fakeRunner{responses: []fakeResp{okResp("")}}
+	g := &Git{stagingDir: "/staging", runner: fr.run}
+
+	changes, err := g.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(changes) != 0 {
+		t.Errorf("expected 0 changes, got %d", len(changes))
+	}
+}
+
+func TestFetchedFilesNoFetchHead(t *testing.T) {
+	// No .git/FETCH_HEAD — should return empty without calling git.
+	staging := t.TempDir()
+	fr := &fakeRunner{}
+	g := &Git{stagingDir: staging, runner: fr.run}
+
+	files, err := g.FetchedFiles(context.Background())
+	if err != nil {
+		t.Fatalf("FetchedFiles: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 files, got %d", len(files))
+	}
+	if len(fr.calls) != 0 {
+		t.Errorf("expected no git calls when FETCH_HEAD absent, got %d", len(fr.calls))
+	}
+}
+
+func TestFetchedFilesReturnsChangedFiles(t *testing.T) {
+	staging := t.TempDir()
+	os.MkdirAll(filepath.Join(staging, ".git"), 0o755)
+	os.WriteFile(filepath.Join(staging, ".git", "FETCH_HEAD"), []byte("abc123"), 0o644)
+
+	fr := &fakeRunner{responses: []fakeResp{okResp("changed.txt\nother.txt\n")}}
+	g := &Git{stagingDir: staging, runner: fr.run}
+
+	files, err := g.FetchedFiles(context.Background())
+	if err != nil {
+		t.Fatalf("FetchedFiles: %v", err)
+	}
+
+	assertCall(t, fr.calls[0], staging, "diff", "--name-only", "HEAD", "FETCH_HEAD")
+
+	want := []string{"changed.txt", "other.txt"}
+	if !slices.Equal(files, want) {
+		t.Errorf("FetchedFiles = %v, want %v", files, want)
+	}
+}
+
+func TestFetchedFilesEmptyWhenUpToDate(t *testing.T) {
+	staging := t.TempDir()
+	os.MkdirAll(filepath.Join(staging, ".git"), 0o755)
+	os.WriteFile(filepath.Join(staging, ".git", "FETCH_HEAD"), []byte("abc123"), 0o644)
+
+	fr := &fakeRunner{responses: []fakeResp{okResp("")}}
+	g := &Git{stagingDir: staging, runner: fr.run}
+
+	files, err := g.FetchedFiles(context.Background())
+	if err != nil {
+		t.Fatalf("FetchedFiles: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected 0 files when up to date, got %d: %v", len(files), files)
 	}
 }

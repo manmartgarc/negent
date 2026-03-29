@@ -380,6 +380,22 @@ func TestPushNewSessionCopied(t *testing.T) {
 	}
 }
 
+func TestPullNoData(t *testing.T) {
+	be := newMockBackend(t)
+	// agentDir does not exist — simulates a remote with no data for this agent.
+	ag := newMockAgent(t, "claude", nil)
+	agents := map[string]agent.Agent{"claude": ag}
+	categories := map[string][]agent.Category{"claude": {agent.CategoryConfig}}
+
+	orch := NewOrchestrator(be, agents)
+	if err := orch.Pull(context.Background(), categories); err != nil {
+		t.Fatalf("Pull with no remote data: %v", err)
+	}
+	if len(ag.placedFiles) != 0 {
+		t.Errorf("expected no placed files, got %d", len(ag.placedFiles))
+	}
+}
+
 func TestPushDeleteCleansEmptyDirs(t *testing.T) {
 	be := newMockBackend(t)
 
