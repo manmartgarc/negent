@@ -60,12 +60,75 @@ func (o *Orchestrator) Push(ctx context.Context, categories map[string][]agent.C
 			src := filepath.Join(ag.SourceDir(), f.RelPath)
 			dst := filepath.Join(agentDir, f.StagingPath)
 
-			if err := copyFile(src, dst); err != nil {
-				return fmt.Errorf("copying %s: %w", f.RelPath, err)
+			if f.Category == agent.CategorySessions {
+				if err := mergeAppendOnly(src, dst); err != nil {
+					return fmt.Errorf("merging session %s: %w", f.RelPath, err)
+				}
+			} else {
+				if err := copyFile(src, dst); err != nil {
+					return fmt.Errorf("copying %s: %w", f.RelPath, err)
+				}
 			}
 		}
 
-		fmt.Printf("  %s: %d files collected\n", name, len(files))
+		// Remove staged files that are no longer collected (deletions).
+		// We compute this inline rather than calling ag.Diff (which would
+		// re-collect and re-build project mappings redundantly).
+		collectedPaths := make(map[string]bool, len(files))
+		localProjDirs := make(map[string]bool)
+		for _, f := range files {
+			collectedPaths[f.StagingPath] = true
+			if strings.HasPrefix(f.StagingPath, "projects/") {
+				parts := strings.SplitN(f.StagingPath, "/", 3)
+				if len(parts) >= 2 {
+					localProjDirs[strings.TrimSuffix(parts[1], ".meta.json")] = true
+				}
+			}
+		}
+
+		catSet := make(map[agent.Category]bool, len(cats))
+		for _, c := range cats {
+			catSet[c] = true
+		}
+
+		deleted := 0
+		filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
+			if err != nil || d.IsDir() {
+				return err
+			}
+			relPath, _ := filepath.Rel(agentDir, path)
+			relPath = filepath.ToSlash(relPath)
+			if collectedPaths[relPath] {
+				return nil
+			}
+			cat := ag.CategorizePath(relPath)
+			if cat != "" && !catSet[cat] {
+				return nil
+			}
+			if cat == agent.CategorySessions {
+				return nil // append-only across machines
+			}
+			if strings.HasPrefix(relPath, "projects/") {
+				parts := strings.SplitN(relPath, "/", 3)
+				if len(parts) >= 2 {
+					dirName := strings.TrimSuffix(parts[1], ".meta.json")
+					if !localProjDirs[dirName] {
+						return nil
+					}
+				}
+			}
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("removing %s: %w", relPath, err)
+			}
+			deleted++
+			return nil
+		})
+
+		fmt.Printf("  %s: %d files collected", name, len(files))
+		if deleted > 0 {
+			fmt.Printf(", %d deleted", deleted)
+		}
+		fmt.Println()
 	}
 
 	msg := fmt.Sprintf("negent push %s", time.Now().Format(time.RFC3339))
@@ -111,7 +174,8 @@ func (o *Orchestrator) Pull(ctx context.Context, categories map[string][]agent.C
 	}
 
 	for name, ag := range o.agents {
-		if _, ok := categories[name]; !ok {
+		cats, ok := categories[name]
+		if !ok {
 			continue
 		}
 
@@ -121,7 +185,13 @@ func (o *Orchestrator) Pull(ctx context.Context, categories map[string][]agent.C
 			continue
 		}
 
-		// Walk staging (now at remote HEAD) to build the full file list.
+		catSet := make(map[agent.Category]bool, len(cats))
+		for _, c := range cats {
+			catSet[c] = true
+		}
+
+		// Walk staging (now at remote HEAD) to build the file list,
+		// filtering to only files belonging to enabled categories.
 		var files []agent.SyncFile
 		err := filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
@@ -129,6 +199,9 @@ func (o *Orchestrator) Pull(ctx context.Context, categories map[string][]agent.C
 			}
 			relPath, _ := filepath.Rel(agentDir, path)
 			relPath = filepath.ToSlash(relPath)
+			if cat := ag.CategorizePath(relPath); cat != "" && !catSet[cat] {
+				return nil
+			}
 			files = append(files, agent.SyncFile{
 				RelPath:     relPath,
 				StagingPath: relPath,
@@ -194,6 +267,53 @@ func (o *Orchestrator) Pull(ctx context.Context, categories map[string][]agent.C
 	}
 
 	return nil
+}
+
+// mergeAppendOnly merges an append-only file (like session JSONL) from src into
+// dst. Lines already present in dst are kept; lines in src not in dst are
+// appended. If dst doesn't exist, src is simply copied.
+func mergeAppendOnly(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+
+	srcData, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+
+	dstData, _ := os.ReadFile(dst) // ignore error: dst may not exist yet
+
+	if len(dstData) == 0 {
+		return os.WriteFile(dst, srcData, 0o644)
+	}
+
+	dstLines := strings.Split(strings.TrimRight(string(dstData), "\n"), "\n")
+	existing := make(map[string]struct{}, len(dstLines))
+	for _, line := range dstLines {
+		existing[line] = struct{}{}
+	}
+
+	srcLines := strings.Split(strings.TrimRight(string(srcData), "\n"), "\n")
+	var newLines []string
+	for _, line := range srcLines {
+		if _, ok := existing[line]; !ok {
+			newLines = append(newLines, line)
+		}
+	}
+
+	if len(newLines) == 0 {
+		return nil
+	}
+
+	f, err := os.OpenFile(dst, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = f.WriteString(strings.Join(newLines, "\n") + "\n")
+	return err
 }
 
 // copyFile copies a file from src to dst, creating parent directories as needed.

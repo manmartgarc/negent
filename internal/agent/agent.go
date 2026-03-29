@@ -71,6 +71,10 @@ type Agent interface {
 	// returning changes. Only files that would be collected are considered.
 	Diff(stagingDir string, categories []Category) ([]backend.FileChange, error)
 
+	// CategorizePath returns the category a staging-relative path belongs to,
+	// or empty string if it cannot be determined.
+	CategorizePath(relPath string) Category
+
 	// DefaultCategories returns which categories to sync by default.
 	DefaultCategories() []Category
 }

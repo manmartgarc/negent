@@ -38,6 +38,7 @@ var categoryRules = map[agent.Category][]collectionRule{
 		{Dir: "skills"},
 		{Dir: "agents"},
 		{Dir: "rules"},
+		{Dir: "output-styles"},
 	},
 	agent.CategoryMemory: {
 		// Handled specially: we walk projects/*/memory/
@@ -459,7 +460,13 @@ func (c *Claude) buildProjectMapping(stagingDir string) (map[string]string, erro
 	for stagingName, meta := range stagingProjects {
 		localDir, matched := c.matchProject(stagingName, meta, localProjects)
 		if matched && localDir != stagingName {
-			mapping[localDir] = stagingName
+			// Only remap if the staging directory actually exists with content.
+			// A sidecar alone (no directory) means this machine's encoding is
+			// the canonical one — no remapping needed.
+			stagingProjDir := filepath.Join(stagingDir, "projects", stagingName)
+			if info, err := os.Stat(stagingProjDir); err == nil && info.IsDir() {
+				mapping[localDir] = stagingName
+			}
 		}
 	}
 	return mapping, nil
@@ -588,13 +595,15 @@ func (c *Claude) Diff(stagingDir string, categories []agent.Category) ([]backend
 			// Skip project files that don't belong to this machine:
 			// - cross-machine dirs (matched to a local project under a different encoding)
 			// - remote-only dirs (no local project at all)
+			// - session files (.jsonl) are append-only across machines; a session
+			//   pushed from another machine should not appear as a local deletion.
 			parts := strings.SplitN(relPath, "/", 3)
 			if len(parts) >= 2 && parts[0] == "projects" {
-				dirName := parts[1]
-				if strings.HasSuffix(dirName, ".meta.json") {
-					dirName = strings.TrimSuffix(dirName, ".meta.json")
-				}
+				dirName := strings.TrimSuffix(parts[1], ".meta.json")
 				if crossMachineDirs[dirName] || !localProjectDirs[dirName] {
+					return nil
+				}
+				if len(parts) == 3 && categorizePath(relPath) == agent.CategorySessions {
 					return nil
 				}
 			}
@@ -685,20 +694,24 @@ func (c *Claude) generateSidecars() ([]agent.SyncFile, error) {
 	return files, nil
 }
 
+// CategorizePath implements the Agent interface.
+func (c *Claude) CategorizePath(relPath string) agent.Category {
+	return categorizePath(relPath)
+}
+
 // categorizePath returns the category a staging-relative path belongs to,
 // or empty string if it cannot be determined.
 func categorizePath(relPath string) agent.Category {
 	switch {
 	case relPath == "history.jsonl":
 		return agent.CategoryHistory
-	case relPath == "CLAUDE.md" || relPath == "settings.json":
-		return agent.CategoryConfig
-	case relPath == "settings.local.json":
+	case relPath == "CLAUDE.md" || relPath == "settings.json" || relPath == "settings.local.json":
 		return agent.CategoryConfig
 	case strings.HasPrefix(relPath, "commands/") ||
 		strings.HasPrefix(relPath, "skills/") ||
 		strings.HasPrefix(relPath, "agents/") ||
-		strings.HasPrefix(relPath, "rules/"):
+		strings.HasPrefix(relPath, "rules/") ||
+		strings.HasPrefix(relPath, "output-styles/"):
 		return agent.CategoryCustomCode
 	case strings.HasPrefix(relPath, "projects/"):
 		parts := strings.SplitN(relPath, "/", 3)

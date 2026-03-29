@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/manmart/negent/internal/agent"
@@ -73,7 +74,28 @@ func (m *mockAgent) Place(stagingDir string, files []agent.SyncFile) (*agent.Pla
 	return &agent.PlaceResult{Placed: len(files)}, nil
 }
 func (m *mockAgent) Diff(stagingDir string, categories []agent.Category) ([]backend.FileChange, error) {
-	return nil, nil
+	// Walk staging to find files not in the collected set (deletions).
+	collected := make(map[string]bool)
+	for _, f := range m.files {
+		collected[f.StagingPath] = true
+	}
+
+	var changes []backend.FileChange
+	filepath.WalkDir(stagingDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(stagingDir, path)
+		rel = filepath.ToSlash(rel)
+		if !collected[rel] {
+			changes = append(changes, backend.FileChange{Path: rel, Kind: backend.ChangeDeleted})
+		}
+		return nil
+	})
+	return changes, nil
+}
+func (m *mockAgent) CategorizePath(relPath string) agent.Category {
+	return ""
 }
 func (m *mockAgent) DefaultCategories() []agent.Category {
 	return []agent.Category{agent.CategoryConfig}
@@ -242,5 +264,154 @@ func TestPullNewRemoteFile(t *testing.T) {
 	// No local file → no conflict → safe to place.
 	if !placed["CLAUDE.md"] {
 		t.Error("CLAUDE.md should be placed (newly added by remote, no local conflict)")
+	}
+}
+
+func TestPushDeletesStaleStagedFiles(t *testing.T) {
+	be := newMockBackend(t)
+
+	// Pre-populate staging with a file that will no longer be collected.
+	agentDir := filepath.Join(be.StagingDir(), "claude")
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(`{"old":"data"}`), 0o644)
+	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("old"), 0o644)
+
+	// Agent now only collects CLAUDE.md — settings.json was removed from collection.
+	files := []agent.SyncFile{
+		{RelPath: "CLAUDE.md", StagingPath: "CLAUDE.md", Category: agent.CategoryConfig},
+	}
+	ag := newMockAgent(t, "claude", files)
+
+	agents := map[string]agent.Agent{"claude": ag}
+	categories := map[string][]agent.Category{"claude": {agent.CategoryConfig}}
+
+	orch := NewOrchestrator(be, agents)
+	if err := orch.Push(context.Background(), categories); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	// settings.json should have been removed from staging.
+	staleFile := filepath.Join(agentDir, "settings.json")
+	if _, err := os.Stat(staleFile); !os.IsNotExist(err) {
+		t.Errorf("settings.json should have been deleted from staging, but still exists")
+	}
+
+	// CLAUDE.md should still be present.
+	keptFile := filepath.Join(agentDir, "CLAUDE.md")
+	if _, err := os.Stat(keptFile); os.IsNotExist(err) {
+		t.Error("CLAUDE.md should still exist in staging")
+	}
+}
+
+func TestPushMergesSessionFiles(t *testing.T) {
+	be := newMockBackend(t)
+
+	// Pre-populate staging with a session file (as if pushed from another machine).
+	agentDir := filepath.Join(be.StagingDir(), "claude")
+	projDir := filepath.Join(agentDir, "projects", "myapp")
+	os.MkdirAll(projDir, 0o755)
+	stagedContent := "line-A\nline-B\nline-C\n"
+	os.WriteFile(filepath.Join(projDir, "session.jsonl"), []byte(stagedContent), 0o644)
+
+	// Local session has overlapping lines (B,C) plus new lines (D,E).
+	localContent := "line-B\nline-C\nline-D\nline-E\n"
+	files := []agent.SyncFile{
+		{RelPath: "projects/myapp/session.jsonl", StagingPath: "projects/myapp/session.jsonl", Category: agent.CategorySessions},
+	}
+	ag := newMockAgent(t, "claude", files)
+	sessionPath := filepath.Join(ag.SourceDir(), "projects", "myapp")
+	os.MkdirAll(sessionPath, 0o755)
+	os.WriteFile(filepath.Join(sessionPath, "session.jsonl"), []byte(localContent), 0o644)
+
+	agents := map[string]agent.Agent{"claude": ag}
+	categories := map[string][]agent.Category{"claude": {agent.CategorySessions}}
+
+	orch := NewOrchestrator(be, agents)
+	if err := orch.Push(context.Background(), categories); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	// Verify merged result: staged lines preserved + local-only lines appended.
+	merged, err := os.ReadFile(filepath.Join(projDir, "session.jsonl"))
+	if err != nil {
+		t.Fatalf("reading merged file: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(string(merged), "\n"), "\n")
+	want := []string{"line-A", "line-B", "line-C", "line-D", "line-E"}
+	if len(lines) != len(want) {
+		t.Fatalf("got %d lines, want %d:\n%s", len(lines), len(want), string(merged))
+	}
+	for i, w := range want {
+		if lines[i] != w {
+			t.Errorf("line %d: got %q, want %q", i, lines[i], w)
+		}
+	}
+}
+
+func TestPushNewSessionCopied(t *testing.T) {
+	be := newMockBackend(t)
+
+	// No pre-existing staged session.
+	localContent := "line-A\nline-B\n"
+	files := []agent.SyncFile{
+		{RelPath: "projects/myapp/session.jsonl", StagingPath: "projects/myapp/session.jsonl", Category: agent.CategorySessions},
+	}
+	ag := newMockAgent(t, "claude", files)
+	sessionPath := filepath.Join(ag.SourceDir(), "projects", "myapp")
+	os.MkdirAll(sessionPath, 0o755)
+	os.WriteFile(filepath.Join(sessionPath, "session.jsonl"), []byte(localContent), 0o644)
+
+	agents := map[string]agent.Agent{"claude": ag}
+	categories := map[string][]agent.Category{"claude": {agent.CategorySessions}}
+
+	orch := NewOrchestrator(be, agents)
+	if err := orch.Push(context.Background(), categories); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	// Verify file was copied (not merged, since no prior staging).
+	staged, err := os.ReadFile(filepath.Join(be.StagingDir(), "claude", "projects", "myapp", "session.jsonl"))
+	if err != nil {
+		t.Fatalf("reading staged file: %v", err)
+	}
+	if string(staged) != localContent {
+		t.Errorf("staged content = %q, want %q", string(staged), localContent)
+	}
+}
+
+func TestPushDeleteCleansEmptyDirs(t *testing.T) {
+	be := newMockBackend(t)
+
+	// Pre-populate staging with a file in a subdirectory.
+	agentDir := filepath.Join(be.StagingDir(), "claude")
+	subDir := filepath.Join(agentDir, "commands")
+	os.MkdirAll(subDir, 0o755)
+	os.WriteFile(filepath.Join(subDir, "old-command.md"), []byte("old"), 0o644)
+
+	// Agent collects nothing — all files removed.
+	ag := newMockAgent(t, "claude", nil)
+
+	agents := map[string]agent.Agent{"claude": ag}
+	categories := map[string][]agent.Category{"claude": {agent.CategoryConfig, agent.CategoryCustomCode}}
+
+	orch := NewOrchestrator(be, agents)
+	if err := orch.Push(context.Background(), categories); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	// The file should be removed.
+	if _, err := os.Stat(filepath.Join(subDir, "old-command.md")); !os.IsNotExist(err) {
+		t.Error("old-command.md should have been deleted from staging")
+	}
+
+	// Verify the parent "commands" dir is now empty or removed.
+	entries, err := os.ReadDir(subDir)
+	if err == nil && len(entries) > 0 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("commands/ should be empty after deletion, but contains: %s", strings.Join(names, ", "))
 	}
 }

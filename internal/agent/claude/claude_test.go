@@ -680,3 +680,52 @@ func TestDiffCrossMachine(t *testing.T) {
 		t.Error("expected MEMORY.md to be reported as modified (local vs remote content differs)")
 	}
 }
+
+// TestDiffSidecarOnlyNoPhantomChanges verifies that when staging has content
+// under the local encoding plus sidecars from another machine (but no dirs),
+// Diff does not report phantom New/Deleted entries.
+func TestDiffSidecarOnlyNoPhantomChanges(t *testing.T) {
+	localDir := t.TempDir()
+	stagingDir := t.TempDir()
+
+	// Local project (Linux encoding — same machine that pushed)
+	localProj := filepath.Join(localDir, "projects", "-home-user-repos-myproject")
+	os.MkdirAll(filepath.Join(localProj, "memory"), 0o755)
+	writeFile(t, filepath.Join(localProj, "memory", "MEMORY.md"), "my memory")
+
+	// Staging has content under the SAME Linux encoding (pushed from this machine)
+	stagingProj := filepath.Join(stagingDir, "projects", "-home-user-repos-myproject")
+	os.MkdirAll(filepath.Join(stagingProj, "memory"), 0o755)
+	writeFile(t, filepath.Join(stagingProj, "memory", "MEMORY.md"), "my memory")
+
+	// Linux sidecar
+	linuxSidecar := SidecarMeta{
+		AbsolutePath: "/home/user/repos/myproject",
+		Segments:     []string{"home", "user", "repos", "myproject"},
+		OS:           "linux",
+	}
+	data, _ := json.MarshalIndent(linuxSidecar, "", "  ")
+	writeFile(t, filepath.Join(stagingDir, "projects", "-home-user-repos-myproject.meta.json"), string(data))
+
+	// Windows sidecar exists but NO corresponding Windows directory in staging
+	winSidecar := SidecarMeta{
+		AbsolutePath: `C:\Users\user\repos\myproject`,
+		Segments:     []string{"C:", "Users", "user", "repos", "myproject"},
+		OS:           "windows",
+	}
+	data, _ = json.MarshalIndent(winSidecar, "", "  ")
+	writeFile(t, filepath.Join(stagingDir, "projects", "C--Users-user-repos-myproject.meta.json"), string(data))
+
+	c := New(localDir)
+	changes, err := c.Diff(stagingDir, []agent.Category{agent.CategoryMemory})
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+
+	if len(changes) != 0 {
+		t.Errorf("expected no changes, got %d:", len(changes))
+		for _, ch := range changes {
+			t.Errorf("  %s: %s", ch.Kind, ch.Path)
+		}
+	}
+}
