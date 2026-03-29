@@ -113,6 +113,7 @@ var excludePatterns = []string{
 	"credentials.json",
 	"auth.json",
 	"stats-cache.json",
+	"install-counts-cache.json",
 	"*.tmp",
 	".lock",
 }
@@ -126,6 +127,7 @@ var excludeDirs = map[string]bool{
 	"downloads":       true,
 	"file-history":    true,
 	"ide":             true,
+	"marketplaces":    true,
 	"paste-cache":     true,
 	"plans":           true,
 	"session-env":     true,

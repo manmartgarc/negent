@@ -148,6 +148,9 @@ func setupTestDir(t *testing.T) string {
 	writeFile(t, filepath.Join(dir, "skills", "my-skill", "skill.md"), "# Skill")
 	os.MkdirAll(filepath.Join(dir, "plugins", "my-plugin"), 0o755)
 	writeFile(t, filepath.Join(dir, "plugins", "my-plugin", "plugin.json"), `{"name":"my-plugin"}`)
+	os.MkdirAll(filepath.Join(dir, "plugins", "marketplaces", "claude-plugins-official"), 0o755)
+	writeFile(t, filepath.Join(dir, "plugins", "marketplaces", "claude-plugins-official", "README.md"), "# Catalog")
+	writeFile(t, filepath.Join(dir, "plugins", "install-counts-cache.json"), `{"version":1}`)
 
 	// Memory (project dirs)
 	projDir := filepath.Join(dir, "projects", "-home-user-repos-myproject")
@@ -310,6 +313,34 @@ func TestCollectExcludes(t *testing.T) {
 				t.Errorf("collected file from excluded dir: %s", f.RelPath)
 			}
 		}
+	}
+}
+
+func TestCollectPluginsExcludesMarketplaceCatalog(t *testing.T) {
+	dir := setupTestDir(t)
+	c := New(dir)
+
+	files, err := c.Collect([]agent.SyncType{SyncTypePlugins})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	var gotPlugin bool
+	for _, f := range files {
+		if f.RelPath == filepath.Join("plugins", "my-plugin", "plugin.json") {
+			gotPlugin = true
+		}
+		rel := filepath.ToSlash(f.RelPath)
+		if rel == "plugins/marketplaces/claude-plugins-official/README.md" {
+			t.Fatalf("collected marketplace catalog file: %s", f.RelPath)
+		}
+		if rel == "plugins/install-counts-cache.json" {
+			t.Fatalf("collected install-counts cache file: %s", f.RelPath)
+		}
+	}
+
+	if !gotPlugin {
+		t.Fatal("expected user plugin file to be collected")
 	}
 }
 
