@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/manmart/negent/internal/agent"
@@ -241,20 +240,13 @@ func TestCollectExcludes(t *testing.T) {
 }
 
 func TestDecodeProjectPath(t *testing.T) {
-	type testCase struct {
+	tests := []struct {
 		encoded string
 		want    string
-	}
-	tests := []testCase{
+	}{
 		{"-home-user-repos-myproject", "/home/user/repos/myproject"},
 		{"-home-user", "/home/user"},
-	}
-	// Windows-encoded paths decode to native Windows paths on Windows,
-	// and fall back to Unix-style best-effort decoding on other platforms.
-	if runtime.GOOS == "windows" {
-		tests = append(tests, testCase{"C--Users-user-repos-myproject", `C:\Users\user\repos\myproject`})
-	} else {
-		tests = append(tests, testCase{"-C-Users-user-repos-myproject", "/C/Users/user/repos/myproject"})
+		{"-C-Users-user-repos-myproject", "/C/Users/user/repos/myproject"},
 	}
 	for _, tt := range tests {
 		got := decodeProjectPath(tt.encoded)
@@ -404,12 +396,12 @@ func TestPlaceTier1ExactMatch(t *testing.T) {
 func TestPlaceTier3SuffixMatch(t *testing.T) {
 	localDir, stagingDir := setupPlaceTest(t)
 
-	// Remote project from Windows with different path prefix
-	remoteDir := "-C-Users-user-repos-myproject"
+	// Remote project from another machine (e.g., macOS) with different path prefix
+	remoteDir := "-Users-otheruser-repos-myproject"
 
 	// Stage memory + sidecar
 	writeFile(t, filepath.Join(stagingDir, "projects", remoteDir, "memory", "notes.md"), "remote notes")
-	sidecar := `{"absolute_path":"/C/Users/user/repos/myproject","segments":["C","Users","user","repos","myproject"],"os":"windows"}`
+	sidecar := `{"absolute_path":"/Users/otheruser/repos/myproject","segments":["Users","otheruser","repos","myproject"],"os":"darwin"}`
 	writeFile(t, filepath.Join(stagingDir, "projects", remoteDir+".meta.json"), sidecar)
 
 	files := []agent.SyncFile{
@@ -501,31 +493,31 @@ func TestSuffixMatchScore(t *testing.T) {
 
 // --- Cross-machine mapping tests ---
 
-// setupCrossMachineTest creates a local dir with a "Windows" project and a
-// staging dir with a "Linux" project + sidecar that share the same suffix.
+// setupCrossMachineTest creates a local dir with a Linux project and a
+// staging dir with a macOS project + sidecar that share the same suffix.
 func setupCrossMachineTest(t *testing.T) (localDir, stagingDir string) {
 	t.Helper()
 	localDir = t.TempDir()
 	stagingDir = t.TempDir()
 
-	// Local project (simulates Windows encoding)
-	localProj := filepath.Join(localDir, "projects", "C--Users-user-repos-myproject")
+	// Local project (Linux encoding)
+	localProj := filepath.Join(localDir, "projects", "-home-user-repos-myproject")
 	os.MkdirAll(filepath.Join(localProj, "memory"), 0o755)
 	writeFile(t, filepath.Join(localProj, "memory", "MEMORY.md"), "local memory")
 
-	// Staging project (simulates Linux encoding with sidecar)
-	stagingProj := filepath.Join(stagingDir, "projects", "-home-user-repos-myproject")
+	// Staging project (simulates macOS encoding with sidecar)
+	stagingProj := filepath.Join(stagingDir, "projects", "-Users-otheruser-repos-myproject")
 	os.MkdirAll(filepath.Join(stagingProj, "memory"), 0o755)
 	writeFile(t, filepath.Join(stagingProj, "memory", "MEMORY.md"), "remote memory")
 	writeFile(t, filepath.Join(stagingProj, "memory", "remote-only.md"), "remote only file")
 
 	sidecar := SidecarMeta{
-		AbsolutePath: "/home/user/repos/myproject",
-		Segments:     []string{"home", "user", "repos", "myproject"},
-		OS:           "linux",
+		AbsolutePath: "/Users/otheruser/repos/myproject",
+		Segments:     []string{"Users", "otheruser", "repos", "myproject"},
+		OS:           "darwin",
 	}
 	data, _ := json.Marshal(sidecar)
-	writeFile(t, filepath.Join(stagingDir, "projects", "-home-user-repos-myproject.meta.json"), string(data))
+	writeFile(t, filepath.Join(stagingDir, "projects", "-Users-otheruser-repos-myproject.meta.json"), string(data))
 
 	return localDir, stagingDir
 }
@@ -578,12 +570,12 @@ func TestBuildProjectMapping(t *testing.T) {
 		t.Fatalf("buildProjectMapping: %v", err)
 	}
 
-	// "C--Users-user-repos-myproject" should map to "-home-user-repos-myproject"
-	// via suffix match (user/repos/myproject = 3 matching segments)
-	want := "-home-user-repos-myproject"
-	got, ok := mapping["C--Users-user-repos-myproject"]
+	// "-home-user-repos-myproject" (local) should map to "-Users-otheruser-repos-myproject" (staging)
+	// via suffix match (repos/myproject = 2 matching segments)
+	want := "-Users-otheruser-repos-myproject"
+	got, ok := mapping["-home-user-repos-myproject"]
 	if !ok {
-		t.Fatalf("no mapping for C--Users-user-repos-myproject; mapping = %v", mapping)
+		t.Fatalf("no mapping for -home-user-repos-myproject; mapping = %v", mapping)
 	}
 	if got != want {
 		t.Errorf("mapping = %q, want %q", got, want)
@@ -592,7 +584,7 @@ func TestBuildProjectMapping(t *testing.T) {
 
 func TestRemapStagingPath(t *testing.T) {
 	mapping := map[string]string{
-		"C--Users-user-repos-myproject": "-home-user-repos-myproject",
+		"-home-user-repos-myproject": "-Users-otheruser-repos-myproject",
 	}
 
 	tests := []struct {
@@ -600,9 +592,9 @@ func TestRemapStagingPath(t *testing.T) {
 		want  string
 	}{
 		// Project files get remapped
-		{"projects/C--Users-user-repos-myproject/memory/MEMORY.md", "projects/-home-user-repos-myproject/memory/MEMORY.md"},
+		{"projects/-home-user-repos-myproject/memory/MEMORY.md", "projects/-Users-otheruser-repos-myproject/memory/MEMORY.md"},
 		// Sidecar files are NOT remapped
-		{"projects/C--Users-user-repos-myproject.meta.json", "projects/C--Users-user-repos-myproject.meta.json"},
+		{"projects/-home-user-repos-myproject.meta.json", "projects/-home-user-repos-myproject.meta.json"},
 		// Non-project files are NOT remapped
 		{"settings.json", "settings.json"},
 		{"CLAUDE.md", "CLAUDE.md"},
@@ -624,8 +616,8 @@ func TestMapStagingPaths(t *testing.T) {
 
 	files := []agent.SyncFile{
 		{RelPath: "CLAUDE.md", StagingPath: "CLAUDE.md"},
-		{RelPath: "projects/C--Users-user-repos-myproject/memory/MEMORY.md", StagingPath: "projects/C--Users-user-repos-myproject/memory/MEMORY.md"},
-		{RelPath: "projects/C--Users-user-repos-myproject.meta.json", StagingPath: "projects/C--Users-user-repos-myproject.meta.json"},
+		{RelPath: "projects/-home-user-repos-myproject/memory/MEMORY.md", StagingPath: "projects/-home-user-repos-myproject/memory/MEMORY.md"},
+		{RelPath: "projects/-home-user-repos-myproject.meta.json", StagingPath: "projects/-home-user-repos-myproject.meta.json"},
 	}
 
 	result, err := c.MapStagingPaths(stagingDir, files)
@@ -636,10 +628,10 @@ func TestMapStagingPaths(t *testing.T) {
 	if result[0].StagingPath != "CLAUDE.md" {
 		t.Errorf("non-project file remapped: %q", result[0].StagingPath)
 	}
-	if result[1].StagingPath != "projects/-home-user-repos-myproject/memory/MEMORY.md" {
+	if result[1].StagingPath != "projects/-Users-otheruser-repos-myproject/memory/MEMORY.md" {
 		t.Errorf("project file not remapped: %q", result[1].StagingPath)
 	}
-	if result[2].StagingPath != "projects/C--Users-user-repos-myproject.meta.json" {
+	if result[2].StagingPath != "projects/-home-user-repos-myproject.meta.json" {
 		t.Errorf("sidecar file was remapped: %q", result[2].StagingPath)
 	}
 }
@@ -658,12 +650,12 @@ func TestDiffCrossMachine(t *testing.T) {
 	}
 
 	for _, ch := range changes {
-		// Should NOT see the Linux-encoded project dir as "Deleted"
-		if ch.Kind == backend.ChangeDeleted && ch.Path == "projects/-home-user-repos-myproject/memory/remote-only.md" {
+		// Should NOT see the macOS-encoded project dir as "Deleted"
+		if ch.Kind == backend.ChangeDeleted && ch.Path == "projects/-Users-otheruser-repos-myproject/memory/remote-only.md" {
 			t.Error("cross-machine file incorrectly reported as deleted")
 		}
-		// Should NOT see the Windows-encoded project dir as "Added"
-		if ch.Kind == backend.ChangeAdded && ch.Path == "projects/C--Users-user-repos-myproject/memory/MEMORY.md" {
+		// Should NOT see the Linux-encoded project dir as "Added"
+		if ch.Kind == backend.ChangeAdded && ch.Path == "projects/-home-user-repos-myproject/memory/MEMORY.md" {
 			t.Error("local file incorrectly reported as new (should map to existing staging path)")
 		}
 	}
@@ -672,7 +664,7 @@ func TestDiffCrossMachine(t *testing.T) {
 	// (content differs: "local memory" vs "remote memory")
 	foundModified := false
 	for _, ch := range changes {
-		if ch.Kind == backend.ChangeModified && ch.Path == "projects/-home-user-repos-myproject/memory/MEMORY.md" {
+		if ch.Kind == backend.ChangeModified && ch.Path == "projects/-Users-otheruser-repos-myproject/memory/MEMORY.md" {
 			foundModified = true
 		}
 	}
@@ -707,14 +699,14 @@ func TestDiffSidecarOnlyNoPhantomChanges(t *testing.T) {
 	data, _ := json.MarshalIndent(linuxSidecar, "", "  ")
 	writeFile(t, filepath.Join(stagingDir, "projects", "-home-user-repos-myproject.meta.json"), string(data))
 
-	// Windows sidecar exists but NO corresponding Windows directory in staging
-	winSidecar := SidecarMeta{
-		AbsolutePath: `C:\Users\user\repos\myproject`,
-		Segments:     []string{"C:", "Users", "user", "repos", "myproject"},
-		OS:           "windows",
+	// macOS sidecar exists but NO corresponding macOS directory in staging
+	macSidecar := SidecarMeta{
+		AbsolutePath: "/Users/otheruser/repos/myproject",
+		Segments:     []string{"Users", "otheruser", "repos", "myproject"},
+		OS:           "darwin",
 	}
-	data, _ = json.MarshalIndent(winSidecar, "", "  ")
-	writeFile(t, filepath.Join(stagingDir, "projects", "C--Users-user-repos-myproject.meta.json"), string(data))
+	data, _ = json.MarshalIndent(macSidecar, "", "  ")
+	writeFile(t, filepath.Join(stagingDir, "projects", "-Users-otheruser-repos-myproject.meta.json"), string(data))
 
 	c := New(localDir)
 	changes, err := c.Diff(stagingDir, []agent.Category{agent.CategoryMemory})

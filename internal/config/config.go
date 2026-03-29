@@ -25,7 +25,6 @@ type Config struct {
 
 // DefaultPath returns the default config file path.
 // On Linux: $XDG_CONFIG_HOME/negent/config.yaml or ~/.config/negent/config.yaml
-// On Windows: %APPDATA%\negent\config.yaml
 // On macOS: ~/Library/Application Support/negent/config.yaml
 func DefaultPath() string {
 	dir, err := os.UserConfigDir()

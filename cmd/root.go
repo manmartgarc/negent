@@ -4,15 +4,17 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/manmart/negent/internal/config"
 	"github.com/spf13/cobra"
 )
 
 var cfgFile string
 
 var rootCmd = &cobra.Command{
-	Use:   "negent",
-	Short: "Sync AI assistant configs across machines",
-	Long:  `negent (negative entropy) keeps your AI coding assistant configurations in sync across machines using a git-backed (or other) remote store.`,
+	Use:               "negent",
+	Short:             "Sync AI assistant configs across machines",
+	Long:              `negent (negative entropy) keeps your AI coding assistant configurations in sync across machines using a git-backed (or other) remote store.`,
+	PersistentPreRunE: checkPlatformSupport,
 }
 
 // Execute runs the root command.
@@ -24,5 +26,5 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/negent/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", fmt.Sprintf("config file (default: %s)", config.DefaultPath()))
 }

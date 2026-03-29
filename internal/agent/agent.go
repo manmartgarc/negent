@@ -82,7 +82,7 @@ type Agent interface {
 // StagingMapper is an optional interface that agents can implement to
 // remap StagingPaths for cross-machine project matching during push and diff.
 // When a project exists in staging under a different path encoding (e.g.,
-// Linux vs Windows), the mapper rewrites paths to target the existing staging
+// Linux vs macOS), the mapper rewrites paths to target the existing staging
 // directory instead of creating a duplicate.
 type StagingMapper interface {
 	// MapStagingPaths rewrites StagingPath fields on collected files to target

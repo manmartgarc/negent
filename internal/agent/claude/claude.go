@@ -746,9 +746,6 @@ func looksLikeHomeDir(meta SidecarMeta) bool {
 	case "darwin":
 		// /Users/<username>
 		return len(meta.Segments) == 2 && meta.Segments[0] == "Users"
-	case "windows":
-		// C:\Users\<username>
-		return len(meta.Segments) == 3 && meta.Segments[1] == "Users"
 	}
 	return false
 }
@@ -759,15 +756,6 @@ func looksLikeHomeDir(meta SidecarMeta) bool {
 // use best-effort decoding — the sidecar stores the real path anyway.
 func decodeProjectPath(encoded string) string {
 	encoded = strings.TrimPrefix(encoded, "-")
-	if runtime.GOOS == "windows" && len(encoded) >= 2 && encoded[1] == '-' &&
-		encoded[0] >= 'A' && encoded[0] <= 'Z' {
-		// Claude on Windows encodes C:\Users\foo as C--Users-foo
-		// (colon→dash, backslash→dash). encoded[2:] starts with the dash
-		// that represents the first backslash, so replacing dashes with
-		// backslashes already produces \Users\foo — just prepend "C:".
-		rest := strings.ReplaceAll(encoded[2:], "-", `\`)
-		return string(encoded[0]) + ":" + rest
-	}
 	return "/" + strings.ReplaceAll(encoded, "-", "/")
 }
 

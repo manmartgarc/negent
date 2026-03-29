@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/manmart/negent/internal/backend"
@@ -50,22 +49,21 @@ func gitExec(ctx context.Context, dir string, args ...string) ([]byte, error) {
 
 // DefaultStagingDir returns the default location for the git working copy.
 // On Linux: $XDG_DATA_HOME/negent/repo or ~/.local/share/negent/repo
-// On Windows: %LOCALAPPDATA%\negent\repo
 // On macOS: ~/Library/Application Support/negent/repo
 func DefaultStagingDir() string {
+	// Prefer XDG_DATA_HOME if set (common on Linux, works on macOS too)
 	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
 		return filepath.Join(dir, "negent", "repo")
 	}
-	switch runtime.GOOS {
-	case "windows":
-		if dir := os.Getenv("LOCALAPPDATA"); dir != "" {
+	// Use os.UserConfigDir for platform-appropriate fallback
+	if dir, err := os.UserConfigDir(); err == nil {
+		// On macOS: ~/Library/Application Support
+		// On Linux: ~/.config (but we prefer .local/share for data)
+		if strings.Contains(dir, "Library") {
 			return filepath.Join(dir, "negent", "repo")
 		}
-	case "darwin":
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, "Library", "Application Support", "negent", "repo")
-		}
 	}
+	// Default: ~/.local/share/negent/repo (Linux standard)
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "share", "negent", "repo")
 }
