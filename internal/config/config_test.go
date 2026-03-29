@@ -49,7 +49,7 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Errorf("Agent source = %q, want %q", ac.Source, "~/.claude")
 	}
 	if len(ac.Sync) != 3 {
-		t.Errorf("Agent sync categories = %d, want 3", len(ac.Sync))
+		t.Errorf("Agent sync entries = %d, want 3", len(ac.Sync))
 	}
 }
 

@@ -19,11 +19,17 @@ No Makefile, CI config, or linter config exists yet — standard `go` toolchain 
 negent is a CLI tool that synchronizes AI coding assistant dotfiles (Claude Code, Copilot, etc.) across machines using a git-backed remote store. It has three core layers:
 
 ### Agent Layer (`internal/agent/`)
-Abstracts per-assistant file collection and placement. The `Agent` interface defines `Collect`, `Place`, and `Diff` operations. Each agent knows which files to sync (organized by `Category`: config, custom-code, memory, sessions, history, plugins) and how to map project directories across machines.
+Abstracts per-assistant file collection and placement. The `Agent` interface defines `Name`, `SourceDir`, `SupportedSyncTypes`, `DefaultSyncTypes`, `NormalizeSyncTypes`, `Collect`, `Place`, `Diff`, and `SyncTypeForPath`. Each agent knows which files to sync (organized by `SyncType`) and how to map project directories across machines.
 
-The Claude implementation (`internal/agent/claude/`) handles `~/.claude` and uses a 4-tier project matching strategy during `Place`: exact path match → git remote match → path suffix match → manual link from config.
+`registry.go` provides `KnownAgents()` and `DetectAgents()` — a built-in list of agents negent supports (claude, codex, copilot, kiro) and auto-detection based on whether their source directories exist.
 
-Sidecar `.meta.json` files are generated alongside project directories during `Collect` to carry the original absolute path, git remote URL, and OS — enabling cross-machine project resolution.
+The optional `StagingMapper` interface lets agents rewrite `StagingPath` fields during push/diff to target existing cross-machine project directories rather than creating duplicates.
+
+The Claude implementation (`internal/agent/claude/`) handles `~/.claude` and defines fine-grained sync types: `claude-md`, `rules`, `commands`, `skills`, `agents`, `output-styles`, `agent-memory`, `auto-memory`, `sessions`, `history`, `keybindings`. Legacy category names (`config`, `custom-code`, `memory`, etc.) are still accepted as aliases. It uses a 6-tier project matching strategy during `Place`: exact path match → git remote match → path suffix match → home dir match → manual link from config → unmatched.
+
+`docs/agent-sync-types.md` is the repo-level reference for per-agent sync-type mappings and upstream documentation links. Add new agent source-of-truth links there when implementing more agents.
+
+Sidecar `.meta.json` files are generated alongside project directories during `Collect` to carry the original absolute path, path segments, git remote URL, OS, and `IsHome` flag — enabling cross-machine project resolution.
 
 ### Backend Layer (`internal/backend/`)
 Abstracts remote storage. The `Backend` interface defines `Init`, `Fetch`, `Push`, `Pull`, `Status`, and `StagingDir` operations. The staging directory (`~/.local/share/negent/repo`) is a local git clone that acts as the merge point between agents and the remote.
@@ -36,7 +42,7 @@ Coordinates multi-agent sync with conflict detection. **Push** collects files fr
 `history.go` handles JSONL merge/dedup for history files (keyed on timestamp+sessionId).
 
 ### Config (`internal/config/`)
-YAML config at `~/.config/negent/config.yaml`. Stores backend type, repo URL, machine name, and per-agent settings (source dir, sync categories, manual project links).
+YAML config at `~/.config/negent/config.yaml`. Stores backend type, repo URL, machine name, and per-agent settings (source dir, sync types, manual project links).
 
 ### CLI (`cmd/`)
 Cobra commands: `init` (interactive setup via charmbracelet/huh), `add`, `push`, `pull`, `status`, `link`.
@@ -47,4 +53,4 @@ Cobra commands: `init` (interactive setup via charmbracelet/huh), `add`, `push`,
 - **Context threading**: All backend and orchestrator methods take `context.Context`.
 - **Error wrapping**: Errors are wrapped with `fmt.Errorf("context: %w", err)`.
 - **Path encoding**: Local paths are encoded as dash-separated segments for use as directory names in the staging area (e.g., `/home/user/repos/myapp` → `-home-user-repos-myapp`).
-- **Excluded files**: The Claude agent excludes credentials, auth tokens, temp files, and transient directories (cache, telemetry, debug, etc.) — see `excludedFiles` and `excludedDirs` in `claude.go`.
+- **Excluded files**: The Claude agent excludes credentials, auth tokens, temp files, and transient directories (cache, telemetry, debug, etc.) — see `excludePatterns` and `excludeDirs` in `claude.go`.

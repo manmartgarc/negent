@@ -116,7 +116,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		Agents:  make(map[string]config.AgentConfig),
 	}
 
-	// For each selected agent, use default categories
+	// For each selected agent, use agent-defined default sync types.
 	for _, name := range selectedAgents {
 		var src string
 		for _, ka := range detected {
@@ -125,10 +125,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 				break
 			}
 		}
-		defaults := defaultCategoriesFor(name)
+		var syncDefaults []string
+		if ag, err := newAgent(name, src, nil); err == nil {
+			syncDefaults = defaultSyncTypeStrings(ag)
+		}
 		cfg.Agents[name] = config.AgentConfig{
 			Source: src,
-			Sync:   defaults,
+			Sync:   syncDefaults,
 		}
 	}
 
@@ -161,10 +164,4 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("✓ Initial pull complete")
 
 	return nil
-}
-
-// defaultCategoriesFor returns the default sync categories for a known agent.
-func defaultCategoriesFor(_ string) []string {
-	// All known agents default to config + custom-code + memory
-	return []string{"config", "custom-code", "memory"}
 }

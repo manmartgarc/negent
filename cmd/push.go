@@ -41,7 +41,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	agents, categories, err := buildAgents(cfg)
+	agents, syncTypes, err := buildAgents(cfg)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 	orch := sync.NewOrchestrator(be, agents)
 
 	fmt.Println("Pushing...")
-	if err := orch.Push(context.Background(), categories); err != nil {
+	if err := orch.Push(context.Background(), syncTypes); err != nil {
 		return fmt.Errorf("push failed: %w", err)
 	}
 
@@ -67,10 +67,10 @@ func newBackend(cfg *config.Config) (backend.Backend, error) {
 	}
 }
 
-// buildAgents creates agent instances and their category maps from config.
-func buildAgents(cfg *config.Config) (map[string]agent.Agent, map[string][]agent.Category, error) {
+// buildAgents creates agent instances and their sync-type maps from config.
+func buildAgents(cfg *config.Config) (map[string]agent.Agent, map[string][]agent.SyncType, error) {
 	agents := make(map[string]agent.Agent)
-	categories := make(map[string][]agent.Category)
+	syncTypes := make(map[string][]agent.SyncType)
 
 	for name, ac := range cfg.Agents {
 		ag, err := newAgent(name, ac.Source, ac.Links)
@@ -79,14 +79,14 @@ func buildAgents(cfg *config.Config) (map[string]agent.Agent, map[string][]agent
 		}
 		agents[name] = ag
 
-		var cats []agent.Category
-		for _, s := range ac.Sync {
-			cats = append(cats, agent.Category(s))
+		types, err := ag.NormalizeSyncTypes(ac.Sync)
+		if err != nil {
+			return nil, nil, fmt.Errorf("agent %s: %w", name, err)
 		}
-		categories[name] = cats
+		syncTypes[name] = types
 	}
 
-	return agents, categories, nil
+	return agents, syncTypes, nil
 }
 
 // newAgent creates an agent instance by name.

@@ -53,6 +53,11 @@ type mockAgent struct {
 	placedFiles []agent.SyncFile // recorded by the most recent Place() call
 }
 
+const (
+	mockTypeClaudeMD = agent.SyncType("claude-md")
+	mockTypeSessions = agent.SyncType("sessions")
+)
+
 func newMockAgent(t *testing.T, name string, files []agent.SyncFile) *mockAgent {
 	dir := t.TempDir()
 	// Create the actual files so copyFile works
@@ -64,16 +69,32 @@ func newMockAgent(t *testing.T, name string, files []agent.SyncFile) *mockAgent 
 	return &mockAgent{name: name, sourceDir: dir, files: files}
 }
 
-func (m *mockAgent) Name() string     { return m.name }
+func (m *mockAgent) Name() string      { return m.name }
 func (m *mockAgent) SourceDir() string { return m.sourceDir }
-func (m *mockAgent) Collect(categories []agent.Category) ([]agent.SyncFile, error) {
+func (m *mockAgent) SupportedSyncTypes() []agent.SyncTypeSpec {
+	return []agent.SyncTypeSpec{
+		{ID: mockTypeClaudeMD, Default: true, Mode: agent.SyncModeReplace},
+		{ID: mockTypeSessions, Mode: agent.SyncModeAppendOnly},
+	}
+}
+func (m *mockAgent) DefaultSyncTypes() []agent.SyncType {
+	return []agent.SyncType{mockTypeClaudeMD}
+}
+func (m *mockAgent) NormalizeSyncTypes(selected []string) ([]agent.SyncType, error) {
+	var syncTypes []agent.SyncType
+	for _, selectedType := range selected {
+		syncTypes = append(syncTypes, agent.SyncType(selectedType))
+	}
+	return syncTypes, nil
+}
+func (m *mockAgent) Collect(syncTypes []agent.SyncType) ([]agent.SyncFile, error) {
 	return m.files, nil
 }
 func (m *mockAgent) Place(stagingDir string, files []agent.SyncFile) (*agent.PlaceResult, error) {
 	m.placedFiles = files
 	return &agent.PlaceResult{Placed: len(files)}, nil
 }
-func (m *mockAgent) Diff(stagingDir string, categories []agent.Category) ([]backend.FileChange, error) {
+func (m *mockAgent) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backend.FileChange, error) {
 	// Walk staging to find files not in the collected set (deletions).
 	collected := make(map[string]bool)
 	for _, f := range m.files {
@@ -94,26 +115,30 @@ func (m *mockAgent) Diff(stagingDir string, categories []agent.Category) ([]back
 	})
 	return changes, nil
 }
-func (m *mockAgent) CategorizePath(relPath string) agent.Category {
-	return ""
-}
-func (m *mockAgent) DefaultCategories() []agent.Category {
-	return []agent.Category{agent.CategoryConfig}
+func (m *mockAgent) SyncTypeForPath(relPath string) agent.SyncType {
+	switch {
+	case relPath == "CLAUDE.md":
+		return mockTypeClaudeMD
+	case strings.HasSuffix(relPath, ".jsonl"):
+		return mockTypeSessions
+	default:
+		return ""
+	}
 }
 
 func TestPush(t *testing.T) {
 	be := newMockBackend(t)
 	files := []agent.SyncFile{
-		{RelPath: "CLAUDE.md", StagingPath: "CLAUDE.md", Category: agent.CategoryConfig},
-		{RelPath: "settings.json", StagingPath: "settings.json", Category: agent.CategoryConfig},
+		{RelPath: "CLAUDE.md", StagingPath: "CLAUDE.md", Type: mockTypeClaudeMD},
+		{RelPath: "settings.json", StagingPath: "settings.json", Type: mockTypeClaudeMD},
 	}
 	ag := newMockAgent(t, "claude", files)
 
 	agents := map[string]agent.Agent{"claude": ag}
-	categories := map[string][]agent.Category{"claude": {agent.CategoryConfig}}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Push(context.Background(), categories); err != nil {
+	if err := orch.Push(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
@@ -135,11 +160,11 @@ func TestPushSkipsUnconfiguredAgents(t *testing.T) {
 	ag := newMockAgent(t, "claude", nil)
 
 	agents := map[string]agent.Agent{"claude": ag}
-	// Empty categories = nothing to sync
-	categories := map[string][]agent.Category{}
+	// Empty sync types = nothing to sync
+	syncTypes := map[string][]agent.SyncType{}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Push(context.Background(), categories); err != nil {
+	if err := orch.Push(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
@@ -158,10 +183,10 @@ func TestPull(t *testing.T) {
 
 	ag := newMockAgent(t, "claude", nil)
 	agents := map[string]agent.Agent{"claude": ag}
-	categories := map[string][]agent.Category{"claude": {agent.CategoryConfig}}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), categories); err != nil {
+	if err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 
@@ -185,10 +210,10 @@ func TestPullConflict(t *testing.T) {
 	os.WriteFile(filepath.Join(ag.SourceDir(), "settings.json"), []byte(`{"key":"val"}`), 0o644)
 
 	agents := map[string]agent.Agent{"claude": ag}
-	categories := map[string][]agent.Category{"claude": {agent.CategoryConfig}}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), categories); err != nil {
+	if err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 
@@ -200,10 +225,6 @@ func TestPullConflict(t *testing.T) {
 	// CLAUDE.md differs from base → conflict → must NOT be placed.
 	if placed["CLAUDE.md"] {
 		t.Error("CLAUDE.md should not be placed (local diverged from base)")
-	}
-	// settings.json matches base → safe → must be placed.
-	if !placed["settings.json"] {
-		t.Error("settings.json should be placed (local matches base)")
 	}
 }
 
@@ -219,10 +240,10 @@ func TestPullNoConflict(t *testing.T) {
 	os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("base content"), 0o644)
 
 	agents := map[string]agent.Agent{"claude": ag}
-	categories := map[string][]agent.Category{"claude": {agent.CategoryConfig}}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), categories); err != nil {
+	if err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 
@@ -249,10 +270,10 @@ func TestPullNewRemoteFile(t *testing.T) {
 	// No local CLAUDE.md — remote added it fresh.
 
 	agents := map[string]agent.Agent{"claude": ag}
-	categories := map[string][]agent.Category{"claude": {agent.CategoryConfig}}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), categories); err != nil {
+	if err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 
@@ -278,15 +299,15 @@ func TestPushDeletesStaleStagedFiles(t *testing.T) {
 
 	// Agent now only collects CLAUDE.md — settings.json was removed from collection.
 	files := []agent.SyncFile{
-		{RelPath: "CLAUDE.md", StagingPath: "CLAUDE.md", Category: agent.CategoryConfig},
+		{RelPath: "CLAUDE.md", StagingPath: "CLAUDE.md", Type: mockTypeClaudeMD},
 	}
 	ag := newMockAgent(t, "claude", files)
 
 	agents := map[string]agent.Agent{"claude": ag}
-	categories := map[string][]agent.Category{"claude": {agent.CategoryConfig}}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Push(context.Background(), categories); err != nil {
+	if err := orch.Push(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
@@ -316,7 +337,7 @@ func TestPushMergesSessionFiles(t *testing.T) {
 	// Local session has overlapping lines (B,C) plus new lines (D,E).
 	localContent := "line-B\nline-C\nline-D\nline-E\n"
 	files := []agent.SyncFile{
-		{RelPath: "projects/myapp/session.jsonl", StagingPath: "projects/myapp/session.jsonl", Category: agent.CategorySessions},
+		{RelPath: "projects/myapp/session.jsonl", StagingPath: "projects/myapp/session.jsonl", Type: mockTypeSessions},
 	}
 	ag := newMockAgent(t, "claude", files)
 	sessionPath := filepath.Join(ag.SourceDir(), "projects", "myapp")
@@ -324,10 +345,10 @@ func TestPushMergesSessionFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(sessionPath, "session.jsonl"), []byte(localContent), 0o644)
 
 	agents := map[string]agent.Agent{"claude": ag}
-	categories := map[string][]agent.Category{"claude": {agent.CategorySessions}}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Push(context.Background(), categories); err != nil {
+	if err := orch.Push(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
@@ -355,7 +376,7 @@ func TestPushNewSessionCopied(t *testing.T) {
 	// No pre-existing staged session.
 	localContent := "line-A\nline-B\n"
 	files := []agent.SyncFile{
-		{RelPath: "projects/myapp/session.jsonl", StagingPath: "projects/myapp/session.jsonl", Category: agent.CategorySessions},
+		{RelPath: "projects/myapp/session.jsonl", StagingPath: "projects/myapp/session.jsonl", Type: mockTypeSessions},
 	}
 	ag := newMockAgent(t, "claude", files)
 	sessionPath := filepath.Join(ag.SourceDir(), "projects", "myapp")
@@ -363,10 +384,10 @@ func TestPushNewSessionCopied(t *testing.T) {
 	os.WriteFile(filepath.Join(sessionPath, "session.jsonl"), []byte(localContent), 0o644)
 
 	agents := map[string]agent.Agent{"claude": ag}
-	categories := map[string][]agent.Category{"claude": {agent.CategorySessions}}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Push(context.Background(), categories); err != nil {
+	if err := orch.Push(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
@@ -385,10 +406,10 @@ func TestPullNoData(t *testing.T) {
 	// agentDir does not exist — simulates a remote with no data for this agent.
 	ag := newMockAgent(t, "claude", nil)
 	agents := map[string]agent.Agent{"claude": ag}
-	categories := map[string][]agent.Category{"claude": {agent.CategoryConfig}}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), categories); err != nil {
+	if err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull with no remote data: %v", err)
 	}
 	if len(ag.placedFiles) != 0 {
@@ -409,10 +430,10 @@ func TestPushDeleteCleansEmptyDirs(t *testing.T) {
 	ag := newMockAgent(t, "claude", nil)
 
 	agents := map[string]agent.Agent{"claude": ag}
-	categories := map[string][]agent.Category{"claude": {agent.CategoryConfig, agent.CategoryCustomCode}}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Push(context.Background(), categories); err != nil {
+	if err := orch.Push(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 

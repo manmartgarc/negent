@@ -27,36 +27,95 @@ func TestNewDefault(t *testing.T) {
 	}
 }
 
-func TestDefaultCategories(t *testing.T) {
+func TestDefaultSyncTypes(t *testing.T) {
 	c := New("")
-	cats := c.DefaultCategories()
+	syncTypes := c.DefaultSyncTypes()
 
-	expected := map[agent.Category]bool{
-		agent.CategoryConfig:     true,
-		agent.CategoryCustomCode: true,
-		agent.CategoryMemory:     true,
+	expected := map[agent.SyncType]bool{
+		SyncTypeClaudeMD:    true,
+		SyncTypeRules:       true,
+		SyncTypeCommands:    true,
+		SyncTypeSkills:      true,
+		SyncTypeAgents:      true,
+		SyncTypeOutputStyle: true,
+		SyncTypeAgentMemory: true,
+		SyncTypeAutoMemory:  true,
 	}
 
-	if len(cats) != len(expected) {
-		t.Fatalf("DefaultCategories() returned %d, want %d", len(cats), len(expected))
+	if len(syncTypes) != len(expected) {
+		t.Fatalf("DefaultSyncTypes() returned %d, want %d", len(syncTypes), len(expected))
 	}
-	for _, cat := range cats {
-		if !expected[cat] {
-			t.Errorf("unexpected default category: %q", cat)
+	for _, syncType := range syncTypes {
+		if !expected[syncType] {
+			t.Errorf("unexpected default sync type: %q", syncType)
 		}
 	}
 }
 
-func TestCategoryRules(t *testing.T) {
-	rules := CategoryRules()
+func TestSyncTypeRules(t *testing.T) {
+	rules := CollectionRules()
 	if len(rules) == 0 {
-		t.Fatal("CategoryRules() returned empty map")
+		t.Fatal("CollectionRules() returned empty map")
 	}
-	if _, ok := rules[agent.CategoryConfig]; !ok {
-		t.Error("missing config category rules")
+	if _, ok := rules[SyncTypeClaudeMD]; !ok {
+		t.Error("missing claude-md rules")
 	}
-	if _, ok := rules[agent.CategoryMemory]; !ok {
-		t.Error("missing memory category rules")
+	if _, ok := rules[SyncTypeAutoMemory]; !ok {
+		t.Error("missing auto-memory rules")
+	}
+}
+
+func TestNormalizeSyncTypesLegacyAliases(t *testing.T) {
+	c := New("")
+
+	got, err := c.NormalizeSyncTypes([]string{"config", "custom-code", "memory", "sessions", "history"})
+	if err != nil {
+		t.Fatalf("NormalizeSyncTypes() returned error: %v", err)
+	}
+
+	want := []agent.SyncType{
+		SyncTypeClaudeMD,
+		SyncTypeCommands,
+		SyncTypeSkills,
+		SyncTypeAgents,
+		SyncTypeRules,
+		SyncTypeOutputStyle,
+		SyncTypeAgentMemory,
+		SyncTypeAutoMemory,
+		SyncTypeSessions,
+		SyncTypeHistory,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("NormalizeSyncTypes() returned %d items, want %d", len(got), len(want))
+	}
+	for i, syncType := range want {
+		if got[i] != syncType {
+			t.Fatalf("NormalizeSyncTypes()[%d] = %q, want %q", i, got[i], syncType)
+		}
+	}
+}
+
+func TestNormalizeSyncTypesEmptyMeansNothing(t *testing.T) {
+	c := New("")
+
+	got, err := c.NormalizeSyncTypes([]string{})
+	if err != nil {
+		t.Fatalf("NormalizeSyncTypes() returned error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("NormalizeSyncTypes(empty) returned %d types, want 0", len(got))
+	}
+}
+
+func TestNormalizeSyncTypesPluginsLegacy(t *testing.T) {
+	c := New("")
+
+	got, err := c.NormalizeSyncTypes([]string{"plugins"})
+	if err != nil {
+		t.Fatalf("NormalizeSyncTypes(plugins) returned error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("NormalizeSyncTypes(plugins) returned %d types, want 0 (no-op alias)", len(got))
 	}
 }
 
@@ -108,11 +167,11 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-func TestCollectConfig(t *testing.T) {
+func TestCollectClaudeMD(t *testing.T) {
 	dir := setupTestDir(t)
 	c := New(dir)
 
-	files, err := c.Collect([]agent.Category{agent.CategoryConfig})
+	files, err := c.Collect([]agent.SyncType{SyncTypeClaudeMD})
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -120,8 +179,8 @@ func TestCollectConfig(t *testing.T) {
 	paths := make(map[string]bool)
 	for _, f := range files {
 		paths[f.RelPath] = true
-		if f.Category != agent.CategoryConfig {
-			t.Errorf("file %q has category %q, want config", f.RelPath, f.Category)
+		if f.Type != SyncTypeClaudeMD {
+			t.Errorf("file %q has type %q, want %q", f.RelPath, f.Type, SyncTypeClaudeMD)
 		}
 	}
 
@@ -141,31 +200,31 @@ func TestCollectConfig(t *testing.T) {
 	}
 }
 
-func TestCollectCustomCode(t *testing.T) {
+func TestCollectCustomTypes(t *testing.T) {
 	dir := setupTestDir(t)
 	c := New(dir)
 
-	files, err := c.Collect([]agent.Category{agent.CategoryCustomCode})
+	files, err := c.Collect([]agent.SyncType{SyncTypeSkills})
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
 
 	if len(files) == 0 {
-		t.Fatal("expected at least one custom code file")
+		t.Fatal("expected at least one skill file")
 	}
 
 	for _, f := range files {
-		if f.Category != agent.CategoryCustomCode {
-			t.Errorf("file %q has category %q, want custom-code", f.RelPath, f.Category)
+		if f.Type != SyncTypeSkills {
+			t.Errorf("file %q has type %q, want %q", f.RelPath, f.Type, SyncTypeSkills)
 		}
 	}
 }
 
-func TestCollectMemory(t *testing.T) {
+func TestCollectAutoMemory(t *testing.T) {
 	dir := setupTestDir(t)
 	c := New(dir)
 
-	files, err := c.Collect([]agent.Category{agent.CategoryMemory})
+	files, err := c.Collect([]agent.SyncType{SyncTypeAutoMemory})
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -192,14 +251,14 @@ func TestCollectSessions(t *testing.T) {
 	dir := setupTestDir(t)
 	c := New(dir)
 
-	files, err := c.Collect([]agent.Category{agent.CategorySessions})
+	files, err := c.Collect([]agent.SyncType{SyncTypeSessions})
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
 
 	found := false
 	for _, f := range files {
-		if filepath.Ext(f.RelPath) == ".jsonl" && f.Category == agent.CategorySessions {
+		if filepath.Ext(f.RelPath) == ".jsonl" && f.Type == SyncTypeSessions {
 			found = true
 		}
 	}
@@ -213,14 +272,19 @@ func TestCollectExcludes(t *testing.T) {
 	c := New(dir)
 
 	// Collect everything
-	allCats := []agent.Category{
-		agent.CategoryConfig,
-		agent.CategoryCustomCode,
-		agent.CategoryMemory,
-		agent.CategorySessions,
-		agent.CategoryHistory,
+	allSyncTypes := []agent.SyncType{
+		SyncTypeClaudeMD,
+		SyncTypeRules,
+		SyncTypeCommands,
+		SyncTypeSkills,
+		SyncTypeAgents,
+		SyncTypeOutputStyle,
+		SyncTypeAgentMemory,
+		SyncTypeAutoMemory,
+		SyncTypeSessions,
+		SyncTypeHistory,
 	}
-	files, err := c.Collect(allCats)
+	files, err := c.Collect(allSyncTypes)
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -565,7 +629,7 @@ func TestBuildProjectMapping(t *testing.T) {
 	localDir, stagingDir := setupCrossMachineTest(t)
 	c := New(localDir)
 
-	mapping, err := c.buildProjectMapping(stagingDir)
+	mapping, _, err := c.buildProjectMapping(stagingDir)
 	if err != nil {
 		t.Fatalf("buildProjectMapping: %v", err)
 	}
@@ -644,7 +708,7 @@ func TestDiffCrossMachine(t *testing.T) {
 	writeFile(t, filepath.Join(localDir, "CLAUDE.md"), "local instructions")
 	writeFile(t, filepath.Join(stagingDir, "CLAUDE.md"), "local instructions")
 
-	changes, err := c.Diff(stagingDir, []agent.Category{agent.CategoryConfig, agent.CategoryMemory})
+	changes, err := c.Diff(stagingDir, []agent.SyncType{SyncTypeClaudeMD, SyncTypeAutoMemory})
 	if err != nil {
 		t.Fatalf("Diff: %v", err)
 	}
@@ -709,7 +773,7 @@ func TestDiffSidecarOnlyNoPhantomChanges(t *testing.T) {
 	writeFile(t, filepath.Join(stagingDir, "projects", "-Users-otheruser-repos-myproject.meta.json"), string(data))
 
 	c := New(localDir)
-	changes, err := c.Diff(stagingDir, []agent.Category{agent.CategoryMemory})
+	changes, err := c.Diff(stagingDir, []agent.SyncType{SyncTypeAutoMemory})
 	if err != nil {
 		t.Fatalf("Diff: %v", err)
 	}

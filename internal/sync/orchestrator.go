@@ -29,16 +29,16 @@ func NewOrchestrator(be backend.Backend, agents map[string]agent.Agent) *Orchest
 }
 
 // Push collects files from all configured agents and pushes them to the backend.
-func (o *Orchestrator) Push(ctx context.Context, categories map[string][]agent.Category) error {
+func (o *Orchestrator) Push(ctx context.Context, syncTypes map[string][]agent.SyncType) error {
 	stagingDir := o.backend.StagingDir()
 
 	for name, ag := range o.agents {
-		cats, ok := categories[name]
+		types, ok := syncTypes[name]
 		if !ok {
 			continue
 		}
 
-		files, err := ag.Collect(cats)
+		files, err := ag.Collect(types)
 		if err != nil {
 			return fmt.Errorf("collecting from %s: %w", name, err)
 		}
@@ -56,11 +56,13 @@ func (o *Orchestrator) Push(ctx context.Context, categories map[string][]agent.C
 			return fmt.Errorf("creating agent dir %s: %w", agentDir, err)
 		}
 
+		specMap := agent.SyncTypeMap(ag)
+
 		for _, f := range files {
 			src := filepath.Join(ag.SourceDir(), f.RelPath)
 			dst := filepath.Join(agentDir, f.StagingPath)
 
-			if f.Category == agent.CategorySessions {
+			if agent.LookupMode(specMap, f.Type) == agent.SyncModeAppendOnly {
 				if err := mergeAppendOnly(src, dst); err != nil {
 					return fmt.Errorf("merging session %s: %w", f.RelPath, err)
 				}
@@ -86,10 +88,7 @@ func (o *Orchestrator) Push(ctx context.Context, categories map[string][]agent.C
 			}
 		}
 
-		catSet := make(map[agent.Category]bool, len(cats))
-		for _, c := range cats {
-			catSet[c] = true
-		}
+		typeSet := agent.SyncTypeSet(types)
 
 		deleted := 0
 		filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
@@ -101,11 +100,11 @@ func (o *Orchestrator) Push(ctx context.Context, categories map[string][]agent.C
 			if collectedPaths[relPath] {
 				return nil
 			}
-			cat := ag.CategorizePath(relPath)
-			if cat != "" && !catSet[cat] {
+			syncType := ag.SyncTypeForPath(relPath)
+			if syncType != "" && !typeSet[syncType] {
 				return nil
 			}
-			if cat == agent.CategorySessions {
+			if agent.LookupMode(specMap, syncType) == agent.SyncModeAppendOnly {
 				return nil // append-only across machines
 			}
 			if strings.HasPrefix(relPath, "projects/") {
@@ -139,7 +138,7 @@ func (o *Orchestrator) Push(ctx context.Context, categories map[string][]agent.C
 // Conflict detection: any non-project file where local differs from the staged
 // base (the last synced remote state) is skipped and reported. This protects
 // local edits regardless of whether the remote also changed the file.
-func (o *Orchestrator) Pull(ctx context.Context, categories map[string][]agent.Category) error {
+func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.SyncType) error {
 	stagingDir := o.backend.StagingDir()
 
 	// Snapshot staged content for non-project files before the working tree is
@@ -147,7 +146,7 @@ func (o *Orchestrator) Pull(ctx context.Context, categories map[string][]agent.C
 	// Project dirs use path-encoded names; Place() handles matching for those.
 	base := make(map[string]map[string][]byte) // agent -> stagingRelPath -> bytes
 	for name := range o.agents {
-		if _, ok := categories[name]; !ok {
+		if _, ok := syncTypes[name]; !ok {
 			continue
 		}
 		agentDir := filepath.Join(stagingDir, name)
@@ -174,7 +173,7 @@ func (o *Orchestrator) Pull(ctx context.Context, categories map[string][]agent.C
 	}
 
 	for name, ag := range o.agents {
-		cats, ok := categories[name]
+		types, ok := syncTypes[name]
 		if !ok {
 			continue
 		}
@@ -185,13 +184,10 @@ func (o *Orchestrator) Pull(ctx context.Context, categories map[string][]agent.C
 			continue
 		}
 
-		catSet := make(map[agent.Category]bool, len(cats))
-		for _, c := range cats {
-			catSet[c] = true
-		}
+		typeSet := agent.SyncTypeSet(types)
 
 		// Walk staging (now at remote HEAD) to build the file list,
-		// filtering to only files belonging to enabled categories.
+		// filtering to only files belonging to enabled sync types.
 		var files []agent.SyncFile
 		err := filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
@@ -199,7 +195,11 @@ func (o *Orchestrator) Pull(ctx context.Context, categories map[string][]agent.C
 			}
 			relPath, _ := filepath.Rel(agentDir, path)
 			relPath = filepath.ToSlash(relPath)
-			if cat := ag.CategorizePath(relPath); cat != "" && !catSet[cat] {
+			syncType := ag.SyncTypeForPath(relPath)
+			if syncType == "" {
+				return nil
+			}
+			if !typeSet[syncType] {
 				return nil
 			}
 			files = append(files, agent.SyncFile{

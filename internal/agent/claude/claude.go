@@ -21,7 +21,7 @@ func DefaultSourceDir() string {
 	return filepath.Join(home, ".claude")
 }
 
-// categoryRules maps each category to collection rules. Rules with Dir set
+// syncTypeRules maps each sync type to collection rules. Rules with Dir set
 // collect all files recursively under that directory. Rules with Glob set
 // use filepath.Glob for exact matching.
 type collectionRule struct {
@@ -29,27 +29,77 @@ type collectionRule struct {
 	Glob string // filepath.Glob pattern (relative to source)
 }
 
-var categoryRules = map[agent.Category][]collectionRule{
-	agent.CategoryConfig: {
+const (
+	SyncTypeClaudeMD    agent.SyncType = "claude-md"
+	SyncTypeRules       agent.SyncType = "rules"
+	SyncTypeCommands    agent.SyncType = "commands"
+	SyncTypeSkills      agent.SyncType = "skills"
+	SyncTypeAgents      agent.SyncType = "agents"
+	SyncTypeOutputStyle agent.SyncType = "output-styles"
+	SyncTypeAgentMemory agent.SyncType = "agent-memory"
+	SyncTypeAutoMemory  agent.SyncType = "auto-memory"
+	SyncTypeSessions    agent.SyncType = "sessions"
+	SyncTypeHistory     agent.SyncType = "history"
+	SyncTypeKeybindings agent.SyncType = "keybindings"
+)
+
+var syncTypeSpecs = []agent.SyncTypeSpec{
+	{ID: SyncTypeClaudeMD, Label: "CLAUDE.md", Description: "Global Claude instructions.", Group: "instructions", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypeRules, Label: "Rules", Description: "Topic-scoped instructions in rules/.", Group: "instructions", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypeCommands, Label: "Commands", Description: "Reusable prompts in commands/.", Group: "prompts", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypeSkills, Label: "Skills", Description: "Skills in skills/<name>/.", Group: "prompts", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypeAgents, Label: "Subagents", Description: "Subagent definitions in agents/.", Group: "prompts", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypeOutputStyle, Label: "Output styles", Description: "Custom output styles in output-styles/.", Group: "prompts", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypeAgentMemory, Label: "Agent memory", Description: "Persistent subagent memory in agent-memory/.", Group: "memory", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypeAutoMemory, Label: "Auto memory", Description: "Project auto-memory in projects/*/memory/.", Group: "memory", Default: true, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypeSessions, Label: "Sessions", Description: "Project session JSONL logs.", Group: "history", Default: false, Mode: agent.SyncModeAppendOnly, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypeHistory, Label: "History", Description: "Global history.jsonl.", Group: "history", Default: false, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+	{ID: SyncTypeKeybindings, Label: "Keybindings", Description: "Global keybindings.json.", Group: "config", Default: false, Mode: agent.SyncModeReplace, Reference: "https://code.claude.com/docs/en/claude-directory"},
+}
+
+var syncTypeRules = map[agent.SyncType][]collectionRule{
+	SyncTypeClaudeMD: {
 		{Glob: "CLAUDE.md"},
 	},
-	agent.CategoryCustomCode: {
-		{Dir: "commands"},
-		{Dir: "skills"},
-		{Dir: "agents"},
+	SyncTypeRules: {
 		{Dir: "rules"},
+	},
+	SyncTypeCommands: {
+		{Dir: "commands"},
+	},
+	SyncTypeSkills: {
+		{Dir: "skills"},
+	},
+	SyncTypeAgents: {
+		{Dir: "agents"},
+	},
+	SyncTypeOutputStyle: {
 		{Dir: "output-styles"},
 	},
-	agent.CategoryMemory: {
-		// Handled specially: we walk projects/*/memory/
+	SyncTypeAgentMemory: {
+		{Dir: "agent-memory"},
+	},
+	SyncTypeAutoMemory: {
 		{Glob: "projects/*/memory/*"},
 	},
-	agent.CategorySessions: {
+	SyncTypeSessions: {
 		{Glob: "projects/*/*.jsonl"},
 	},
-	agent.CategoryHistory: {
+	SyncTypeHistory: {
 		{Glob: "history.jsonl"},
 	},
+	SyncTypeKeybindings: {
+		{Glob: "keybindings.json"},
+	},
+}
+
+var legacySyncTypeAliases = map[string][]agent.SyncType{
+	"config":      {SyncTypeClaudeMD},
+	"custom-code": {SyncTypeCommands, SyncTypeSkills, SyncTypeAgents, SyncTypeRules, SyncTypeOutputStyle},
+	"memory":      {SyncTypeAgentMemory, SyncTypeAutoMemory},
+	"sessions":    {SyncTypeSessions},
+	"history":     {SyncTypeHistory},
+	"plugins":     {}, // legacy no-op; previously selectable but never collected
 }
 
 // excludePatterns are always excluded from sync.
@@ -64,22 +114,22 @@ var excludePatterns = []string{
 
 // excludeDirs are directories always excluded from sync.
 var excludeDirs = map[string]bool{
-	"telemetry":     true,
-	"cache":         true,
-	"backups":       true,
-	"debug":         true,
-	"downloads":     true,
-	"file-history":  true,
-	"ide":           true,
-	"paste-cache":   true,
-	"plans":         true,
-	"plugins":       true,
-	"session-env":   true,
-	"sessions":      true,
+	"telemetry":       true,
+	"cache":           true,
+	"backups":         true,
+	"debug":           true,
+	"downloads":       true,
+	"file-history":    true,
+	"ide":             true,
+	"paste-cache":     true,
+	"plans":           true,
+	"plugins":         true,
+	"session-env":     true,
+	"sessions":        true,
 	"shell-snapshots": true,
-	"tasks":         true,
-	"teams":         true,
-	"todos":         true,
+	"tasks":           true,
+	"teams":           true,
+	"todos":           true,
 }
 
 // SidecarMeta is the metadata written alongside each project directory
@@ -120,24 +170,60 @@ func (c *Claude) SourceDir() string {
 	return c.sourceDir
 }
 
-func (c *Claude) DefaultCategories() []agent.Category {
-	return []agent.Category{
-		agent.CategoryConfig,
-		agent.CategoryCustomCode,
-		agent.CategoryMemory,
-	}
+func (c *Claude) SupportedSyncTypes() []agent.SyncTypeSpec {
+	return syncTypeSpecs
 }
 
-func (c *Claude) Collect(categories []agent.Category) ([]agent.SyncFile, error) {
-	var files []agent.SyncFile
+func (c *Claude) DefaultSyncTypes() []agent.SyncType {
+	var defaults []agent.SyncType
+	for _, spec := range syncTypeSpecs {
+		if spec.Default {
+			defaults = append(defaults, spec.ID)
+		}
+	}
+	return defaults
+}
 
-	catSet := make(map[agent.Category]bool)
-	for _, cat := range categories {
-		catSet[cat] = true
+func (c *Claude) NormalizeSyncTypes(selected []string) ([]agent.SyncType, error) {
+	if len(selected) == 0 {
+		return nil, nil
 	}
 
-	for cat, rules := range categoryRules {
-		if !catSet[cat] {
+	supported := agent.SyncTypeMap(c)
+	seen := make(map[agent.SyncType]bool)
+	var resolved []agent.SyncType
+
+	for _, raw := range selected {
+		if aliases, ok := legacySyncTypeAliases[raw]; ok {
+			for _, syncType := range aliases {
+				if !seen[syncType] {
+					resolved = append(resolved, syncType)
+					seen[syncType] = true
+				}
+			}
+			continue
+		}
+
+		syncType := agent.SyncType(raw)
+		if _, ok := supported[syncType]; !ok {
+			return nil, fmt.Errorf("unsupported sync type %q", raw)
+		}
+		if !seen[syncType] {
+			resolved = append(resolved, syncType)
+			seen[syncType] = true
+		}
+	}
+
+	return resolved, nil
+}
+
+func (c *Claude) Collect(syncTypes []agent.SyncType) ([]agent.SyncFile, error) {
+	var files []agent.SyncFile
+
+	typeSet := agent.SyncTypeSet(syncTypes)
+
+	for syncType, rules := range syncTypeRules {
+		if !typeSet[syncType] {
 			continue
 		}
 
@@ -162,14 +248,14 @@ func (c *Claude) Collect(categories []agent.Category) ([]agent.SyncFile, error) 
 				files = append(files, agent.SyncFile{
 					RelPath:     relPath,
 					StagingPath: filepath.ToSlash(relPath),
-					Category:    cat,
+					Type:        syncType,
 				})
 			}
 		}
 	}
 
 	// Generate sidecar metadata for project directories
-	if catSet[agent.CategoryMemory] || catSet[agent.CategorySessions] {
+	if typeSet[SyncTypeAutoMemory] || typeSet[SyncTypeSessions] {
 		sidecars, err := c.generateSidecars()
 		if err != nil {
 			return nil, fmt.Errorf("generating sidecars: %w", err)
@@ -229,7 +315,13 @@ func (c *Claude) Place(stagingDir string, files []agent.SyncFile) (*agent.PlaceR
 	// Separate files into project files and non-project files
 	var nonProjectFiles []agent.SyncFile
 	projectFiles := make(map[string][]agent.SyncFile) // encoded dir name -> files
-	sidecarFiles := make(map[string]SidecarMeta)       // encoded dir name -> metadata
+	sidecarFiles, err := listStagingProjects(stagingDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading project sidecars: %w", err)
+	}
+	if sidecarFiles == nil {
+		sidecarFiles = make(map[string]SidecarMeta)
+	}
 
 	for _, f := range files {
 		parts := strings.SplitN(f.RelPath, "/", 3)
@@ -238,14 +330,6 @@ func (c *Claude) Place(stagingDir string, files []agent.SyncFile) (*agent.PlaceR
 
 			// Check if this is a sidecar file
 			if strings.HasSuffix(encodedDir, ".meta.json") {
-				encodedDir = strings.TrimSuffix(encodedDir, ".meta.json")
-				data, err := os.ReadFile(filepath.Join(stagingDir, f.RelPath))
-				if err == nil {
-					var meta SidecarMeta
-					if json.Unmarshal(data, &meta) == nil {
-						sidecarFiles[encodedDir] = meta
-					}
-				}
 				continue // don't place sidecar files themselves
 			}
 
@@ -302,6 +386,7 @@ func (c *Claude) Place(stagingDir string, files []agent.SyncFile) (*agent.PlaceR
 
 	return result, nil
 }
+
 
 // matchProject implements the 4-tier matching algorithm.
 // Returns the local encoded directory name and whether a match was found.
@@ -441,19 +526,20 @@ func listStagingProjects(stagingDir string) (map[string]SidecarMeta, error) {
 }
 
 // buildProjectMapping returns a map of localEncodedDir -> stagingEncodedDir
-// for projects that exist in staging under a different path encoding (cross-machine).
-// Projects with the same encoding on both sides are omitted (no remapping needed).
-func (c *Claude) buildProjectMapping(stagingDir string) (map[string]string, error) {
+// for projects that exist in staging under a different path encoding (cross-machine),
+// along with the local projects map. Projects with the same encoding on both
+// sides are omitted from the mapping (no remapping needed).
+func (c *Claude) buildProjectMapping(stagingDir string) (map[string]string, map[string]string, error) {
 	localProjects, err := c.listLocalProjects()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	stagingProjects, err := listStagingProjects(stagingDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(localProjects) == 0 || len(stagingProjects) == 0 {
-		return nil, nil
+		return nil, localProjects, nil
 	}
 
 	mapping := make(map[string]string)
@@ -469,7 +555,7 @@ func (c *Claude) buildProjectMapping(stagingDir string) (map[string]string, erro
 			}
 		}
 	}
-	return mapping, nil
+	return mapping, localProjects, nil
 }
 
 // remapStagingPath rewrites the project directory segment of a staging path
@@ -498,7 +584,7 @@ func remapStagingPath(stagingPath string, mapping map[string]string) string {
 // fields for project files that have cross-machine equivalents in staging.
 // Sidecar files are not remapped — both machines' sidecars coexist in staging.
 func (c *Claude) MapStagingPaths(stagingDir string, files []agent.SyncFile) ([]agent.SyncFile, error) {
-	mapping, err := c.buildProjectMapping(stagingDir)
+	mapping, _, err := c.buildProjectMapping(stagingDir)
 	if err != nil {
 		return nil, fmt.Errorf("building project mapping: %w", err)
 	}
@@ -527,20 +613,17 @@ func copyFileForPlace(src, dst string) error {
 	return os.WriteFile(dst, data, 0o644)
 }
 
-func (c *Claude) Diff(stagingDir string, categories []agent.Category) ([]backend.FileChange, error) {
-	files, err := c.Collect(categories)
+func (c *Claude) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backend.FileChange, error) {
+	files, err := c.Collect(syncTypes)
 	if err != nil {
 		return nil, fmt.Errorf("collecting files: %w", err)
 	}
 
 	// Build cross-machine project mapping so we compare against the right
 	// staging paths and don't report other machines' project dirs as deletions.
-	mapping, _ := c.buildProjectMapping(stagingDir)
+	mapping, localProjects, _ := c.buildProjectMapping(stagingDir)
 
-	// Collect local project dir names so we know which staging project dirs
-	// belong to this machine.
 	localProjectDirs := make(map[string]bool)
-	localProjects, _ := c.listLocalProjects()
 	for dirName := range localProjects {
 		localProjectDirs[dirName] = true
 	}
@@ -571,11 +654,7 @@ func (c *Claude) Diff(stagingDir string, categories []agent.Category) ([]backend
 		}
 	}
 
-	// Build set of enabled categories for filtering the deletion scan.
-	catSet := make(map[agent.Category]bool, len(categories))
-	for _, cat := range categories {
-		catSet[cat] = true
-	}
+	typeSet := agent.SyncTypeSet(syncTypes)
 
 	// Find staged files not present locally (deletions)
 	if _, err := os.Stat(stagingDir); err == nil {
@@ -588,8 +667,8 @@ func (c *Claude) Diff(stagingDir string, categories []agent.Category) ([]backend
 			if localPaths[relPath] {
 				return nil
 			}
-			// Only report deletions for files that belong to an enabled category.
-			if cat := categorizePath(relPath); cat != "" && !catSet[cat] {
+			// Only report deletions for files that belong to an enabled sync type.
+			if syncType := syncTypeForPath(relPath); syncType != "" && !typeSet[syncType] {
 				return nil
 			}
 			// Skip project files that don't belong to this machine:
@@ -603,7 +682,7 @@ func (c *Claude) Diff(stagingDir string, categories []agent.Category) ([]backend
 				if crossMachineDirs[dirName] || !localProjectDirs[dirName] {
 					return nil
 				}
-				if len(parts) == 3 && categorizePath(relPath) == agent.CategorySessions {
+				if len(parts) == 3 && syncTypeForPath(relPath) == SyncTypeSessions {
 					return nil
 				}
 			}
@@ -687,46 +766,54 @@ func (c *Claude) generateSidecars() ([]agent.SyncFile, error) {
 		files = append(files, agent.SyncFile{
 			RelPath:     relPath,
 			StagingPath: "projects/" + dirName + ".meta.json",
-			Category:    agent.CategoryMemory,
+			Type:        SyncTypeAutoMemory,
 		})
 	}
 
 	return files, nil
 }
 
-// CategorizePath implements the Agent interface.
-func (c *Claude) CategorizePath(relPath string) agent.Category {
-	return categorizePath(relPath)
+// SyncTypeForPath implements the Agent interface.
+func (c *Claude) SyncTypeForPath(relPath string) agent.SyncType {
+	return syncTypeForPath(relPath)
 }
 
-// categorizePath returns the category a staging-relative path belongs to,
+// syncTypeForPath returns the sync type a staging-relative path belongs to,
 // or empty string if it cannot be determined.
-func categorizePath(relPath string) agent.Category {
+func syncTypeForPath(relPath string) agent.SyncType {
 	switch {
 	case relPath == "history.jsonl":
-		return agent.CategoryHistory
-	case relPath == "CLAUDE.md" || relPath == "settings.json" || relPath == "settings.local.json":
-		return agent.CategoryConfig
-	case strings.HasPrefix(relPath, "commands/") ||
-		strings.HasPrefix(relPath, "skills/") ||
-		strings.HasPrefix(relPath, "agents/") ||
-		strings.HasPrefix(relPath, "rules/") ||
-		strings.HasPrefix(relPath, "output-styles/"):
-		return agent.CategoryCustomCode
+		return SyncTypeHistory
+	case relPath == "CLAUDE.md":
+		return SyncTypeClaudeMD
+	case relPath == "keybindings.json":
+		return SyncTypeKeybindings
+	case strings.HasPrefix(relPath, "commands/"):
+		return SyncTypeCommands
+	case strings.HasPrefix(relPath, "skills/"):
+		return SyncTypeSkills
+	case strings.HasPrefix(relPath, "agents/"):
+		return SyncTypeAgents
+	case strings.HasPrefix(relPath, "rules/"):
+		return SyncTypeRules
+	case strings.HasPrefix(relPath, "output-styles/"):
+		return SyncTypeOutputStyle
+	case strings.HasPrefix(relPath, "agent-memory/"):
+		return SyncTypeAgentMemory
 	case strings.HasPrefix(relPath, "projects/"):
 		parts := strings.SplitN(relPath, "/", 3)
 		if len(parts) < 3 {
 			return ""
 		}
 		if strings.HasSuffix(parts[1], ".meta.json") {
-			return agent.CategoryMemory // sidecars are generated alongside memory/sessions
+			return SyncTypeAutoMemory
 		}
 		sub := parts[2]
 		if strings.HasPrefix(sub, "memory/") {
-			return agent.CategoryMemory
+			return SyncTypeAutoMemory
 		}
 		if strings.HasSuffix(sub, ".jsonl") {
-			return agent.CategorySessions
+			return SyncTypeSessions
 		}
 	}
 	return ""
@@ -783,9 +870,9 @@ func gitRemoteFor(path string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// CategoryRules returns the collection rules for each category.
-func CategoryRules() map[agent.Category][]collectionRule {
-	return categoryRules
+// CollectionRules returns the collection rules for each sync type.
+func CollectionRules() map[agent.SyncType][]collectionRule {
+	return syncTypeRules
 }
 
 // ExcludePatterns returns the patterns that are always excluded.

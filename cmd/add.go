@@ -14,7 +14,7 @@ import (
 var addCmd = &cobra.Command{
 	Use:   "add <agent>",
 	Short: "Register an agent for syncing",
-	Long:  `Add a new AI assistant agent to sync. Detects the agent's config directory and configures default sync categories.`,
+	Long:  `Add a new AI assistant agent to sync. Detects the agent's config directory and configures default sync types.`,
 	Args:  cobra.ExactArgs(1),
 	RunE:  runAdd,
 }
@@ -64,25 +64,27 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("agent source directory not found: %s", expanded)
 	}
 
-	// Category selection
-	defaults := defaultCategoriesFor(agentName)
-	allCats := []string{"config", "custom-code", "memory", "sessions", "history", "plugins"}
+	var selectedCats []string
+	if ag, err := newAgent(agentName, sourceDir, nil); err == nil {
+		// Agent has a full implementation — offer interactive sync type selection.
+		defaults := defaultSyncTypeStrings(ag)
+		allSyncTypes := syncTypeOptions(ag)
 
-	var options []huh.Option[string]
-	for _, c := range allCats {
-		options = append(options, huh.NewOption(c, c))
-	}
+		var options []huh.Option[string]
+		for _, syncType := range allSyncTypes {
+			options = append(options, huh.NewOption(syncType, syncType))
+		}
 
-	selectedCats := make([]string, len(defaults))
-	copy(selectedCats, defaults)
+		selectedCats = make([]string, len(defaults))
+		copy(selectedCats, defaults)
 
-	err = huh.NewMultiSelect[string]().
-		Title(fmt.Sprintf("Categories to sync for %s", agentName)).
-		Options(options...).
-		Value(&selectedCats).
-		Run()
-	if err != nil {
-		return err
+		if err := huh.NewMultiSelect[string]().
+			Title(fmt.Sprintf("Select sync types for %s", agentName)).
+			Options(options...).
+			Value(&selectedCats).
+			Run(); err != nil {
+			return err
+		}
 	}
 
 	cfg.Agents[agentName] = config.AgentConfig{

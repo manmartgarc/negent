@@ -37,7 +37,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	agents, categories, err := buildAgents(cfg)
+	agents, syncTypes, err := buildAgents(cfg)
 	if err != nil {
 		return err
 	}
@@ -45,7 +45,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 	orch := sync.NewOrchestrator(be, agents)
 
 	fmt.Println("Pulling...")
-	if err := orch.Pull(context.Background(), categories); err != nil {
+	if err := orch.Pull(context.Background(), syncTypes); err != nil {
 		return fmt.Errorf("pull failed: %w", err)
 	}
 
