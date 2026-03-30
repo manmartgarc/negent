@@ -63,7 +63,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Pushing...")
 	if err := orch.Push(context.Background(), syncTypes); err != nil {
-		return fmt.Errorf("push failed: %w", err)
+		return formatSyncOpError("push", "negent push", err)
 	}
 
 	fmt.Println("✓ Push complete")

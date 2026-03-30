@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -10,6 +11,7 @@ import (
 	"github.com/charmbracelet/huh"
 
 	"github.com/manmart/negent/internal/agent"
+	gitbackend "github.com/manmart/negent/internal/backend/git"
 	"github.com/manmart/negent/internal/config"
 	syncpkg "github.com/manmart/negent/internal/sync"
 )
@@ -281,4 +283,37 @@ func loadCurrentPlan(ctx context.Context, cfg *config.Config) (*syncpkg.SyncPlan
 	}
 	orch := syncpkg.NewOrchestrator(be, agents)
 	return orch.Plan(ctx, syncTypes)
+}
+
+func formatSyncOpError(op, command string, err error) error {
+	var conflictErr *gitbackend.ConflictError
+	if errors.As(err, &conflictErr) {
+		if len(conflictErr.Files) > 0 {
+			return fmt.Errorf(
+				"%s failed due to git content conflicts during %s (%d file%s): %s\nResolve conflicts in the staging repo (%s), then run `%s` again",
+				op,
+				conflictErr.Command,
+				len(conflictErr.Files),
+				plural(len(conflictErr.Files)),
+				strings.Join(conflictErr.Files, ", "),
+				gitbackend.DefaultStagingDir(),
+				command,
+			)
+		}
+		return fmt.Errorf(
+			"%s failed due to git content conflicts during %s\nResolve conflicts in the staging repo (%s), then run `%s` again",
+			op,
+			conflictErr.Command,
+			gitbackend.DefaultStagingDir(),
+			command,
+		)
+	}
+	return fmt.Errorf("%s failed: %w", op, err)
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }

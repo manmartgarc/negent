@@ -59,7 +59,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Pulling...")
 	if err := orch.Pull(context.Background(), syncTypes); err != nil {
-		return fmt.Errorf("pull failed: %w", err)
+		return formatSyncOpError("pull", "negent pull", err)
 	}
 
 	fmt.Println("✓ Pull complete")

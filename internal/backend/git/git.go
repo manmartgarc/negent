@@ -6,12 +6,29 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/manmart/negent/internal/backend"
 )
 
 const BackendName = "git"
+
+// ConflictError indicates git reported a content conflict while rebasing.
+type ConflictError struct {
+	Command string
+	Files   []string
+	Err     error
+}
+
+func (e *ConflictError) Error() string {
+	if len(e.Files) == 0 {
+		return fmt.Sprintf("git %s: conflict", e.Command)
+	}
+	return fmt.Sprintf("git %s: conflict in %s", e.Command, strings.Join(e.Files, ", "))
+}
+
+func (e *ConflictError) Unwrap() error { return e.Err }
 
 // runnerFn executes a git subcommand in dir and returns combined output.
 // Injected into Git so tests can verify outgoing commands without running git.
@@ -89,25 +106,32 @@ func (g *Git) Init(ctx context.Context, cfg backend.BackendConfig) error {
 }
 
 func (g *Git) Push(ctx context.Context, msg string) error {
+	// Safety-first flow: always rebase on top of latest remote before mutating.
+	if err := g.Pull(ctx); err != nil {
+		return fmt.Errorf("pre-push pull failed: %w", err)
+	}
+
 	if err := g.run(ctx, g.stagingDir, "add", "-A"); err != nil {
 		return err
 	}
 
 	// Check if there's anything to commit
-	if err := g.run(ctx, g.stagingDir, "diff", "--cached", "--quiet"); err == nil {
-		return nil // nothing to commit
-	}
-
-	if err := g.run(ctx, g.stagingDir, "commit", "-m", msg); err != nil {
-		return err
-	}
-
-	// If push fails (e.g., remote has new commits), pull --rebase and retry.
-	if err := g.run(ctx, g.stagingDir, "push"); err != nil {
-		if pullErr := g.Pull(ctx); pullErr != nil {
-			return fmt.Errorf("push rejected and pull failed: %w", pullErr)
+	if err := g.run(ctx, g.stagingDir, "diff", "--cached", "--quiet"); err != nil {
+		if err := g.run(ctx, g.stagingDir, "commit", "-m", msg); err != nil {
+			return err
 		}
-		return g.run(ctx, g.stagingDir, "push")
+	}
+
+	// Always attempt push, including when there was nothing new to commit
+	// but previous local commits are still pending.
+	if err := g.run(ctx, g.stagingDir, "push"); err != nil {
+		// Remote may have advanced after pre-pull; retry once.
+		if pullErr := g.Pull(ctx); pullErr != nil {
+			return fmt.Errorf("push rejected and retry pull failed: %w", pullErr)
+		}
+		if retryErr := g.run(ctx, g.stagingDir, "push"); retryErr != nil {
+			return fmt.Errorf("push failed after retry: %w", retryErr)
+		}
 	}
 	return nil
 }
@@ -172,11 +196,22 @@ func (g *Git) Pull(ctx context.Context) error {
 			_ = g.run(ctx, g.stagingDir, "rebase", "--abort")
 		}
 	}
-	// Use -X theirs so that rebase conflicts are resolved in favor of the
-	// remote. The staging dir is a cache of remote state — the orchestrator
-	// handles real conflict detection between staging and the user's local
-	// source directories.
-	return g.run(ctx, g.stagingDir, "pull", "--rebase", "-X", "theirs")
+	// Keep linear history and rely on git's default conflict behavior.
+	out, err := g.runner(ctx, g.stagingDir, "pull", "--rebase")
+	if err != nil {
+		conflicts, conflictsErr := g.conflictedFiles(ctx)
+		// Leave staging clean on conflict so future commands can proceed.
+		_ = g.run(ctx, g.stagingDir, "rebase", "--abort")
+		if (conflictsErr == nil && len(conflicts) > 0) || looksLikeConflict(out, err) {
+			return &ConflictError{
+				Command: "pull --rebase",
+				Files:   conflicts,
+				Err:     err,
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func (g *Git) Status(ctx context.Context) ([]backend.FileChange, error) {
@@ -218,4 +253,31 @@ func (g *Git) StagingDir() string {
 func (g *Git) run(ctx context.Context, dir string, args ...string) error {
 	_, err := g.runner(ctx, dir, args...)
 	return err
+}
+
+func (g *Git) conflictedFiles(ctx context.Context) ([]string, error) {
+	out, err := g.runner(ctx, g.stagingDir, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return nil, nil
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	files := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			files = append(files, trimmed)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func looksLikeConflict(out []byte, err error) bool {
+	msg := strings.ToLower(string(out))
+	if err != nil {
+		msg += "\n" + strings.ToLower(err.Error())
+	}
+	return strings.Contains(msg, "conflict") || strings.Contains(msg, "could not apply")
 }
