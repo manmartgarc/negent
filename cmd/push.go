@@ -22,9 +22,11 @@ var pushCmd = &cobra.Command{
 }
 
 var pushDryRunFlag bool
+var pushQuietFlag bool
 
 func init() {
 	pushCmd.Flags().BoolVar(&pushDryRunFlag, "dry-run", false, "preview push changes without writing to staging or remote")
+	pushCmd.Flags().BoolVar(&pushQuietFlag, "quiet", false, "suppress informational output (errors still go to stderr)")
 	rootCmd.AddCommand(pushCmd)
 }
 
@@ -61,12 +63,16 @@ func runPush(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Println("Pushing...")
+	if !pushQuietFlag {
+		fmt.Println("Pushing...")
+	}
 	if err := orch.Push(context.Background(), syncTypes); err != nil {
 		return formatSyncOpError("push", "negent push", err)
 	}
 
-	fmt.Println("✓ Push complete")
+	if !pushQuietFlag {
+		fmt.Println("✓ Push complete")
+	}
 	return nil
 }
 

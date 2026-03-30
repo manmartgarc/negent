@@ -18,9 +18,11 @@ var pullCmd = &cobra.Command{
 }
 
 var pullDryRunFlag bool
+var pullQuietFlag bool
 
 func init() {
 	pullCmd.Flags().BoolVar(&pullDryRunFlag, "dry-run", false, "preview pull changes without writing local files")
+	pullCmd.Flags().BoolVar(&pullQuietFlag, "quiet", false, "suppress informational output (errors still go to stderr)")
 	rootCmd.AddCommand(pullCmd)
 }
 
@@ -57,15 +59,19 @@ func runPull(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Println("Pulling...")
+	if !pullQuietFlag {
+		fmt.Println("Pulling...")
+	}
 	result, err := orch.Pull(context.Background(), syncTypes)
 	if err != nil {
 		return formatSyncOpError("pull", "negent pull", err)
 	}
 
-	fmt.Println("✓ Pull complete")
+	if !pullQuietFlag {
+		fmt.Println("✓ Pull complete")
+	}
 	if len(result.Conflicts) > 0 {
-		fmt.Printf("  %d conflict(s) unresolved — run 'negent conflicts' to resolve\n", len(result.Conflicts))
+		fmt.Printf("%d conflict(s) — run 'negent conflicts' to resolve\n", len(result.Conflicts))
 	}
 	return nil
 }
