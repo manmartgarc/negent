@@ -133,8 +133,6 @@ func TestInitPullsIfAlreadyCloned(t *testing.T) {
 
 func TestPushSendsCommitAndPush(t *testing.T) {
 	fr := &fakeRunner{responses: []fakeResp{
-		okResp("abc123\n"),  // rev-parse HEAD (inside pre-push Pull)
-		okResp(""),          // pull --rebase
 		okResp(""),          // add -A
 		errResp("has diff"), // diff --cached --quiet (non-zero = changes exist)
 		okResp(""),          // commit -m
@@ -146,25 +144,21 @@ func TestPushSendsCommitAndPush(t *testing.T) {
 		t.Fatalf("Push: %v", err)
 	}
 
-	if len(fr.calls) != 6 {
-		t.Fatalf("expected 6 calls, got %d", len(fr.calls))
+	if len(fr.calls) != 4 {
+		t.Fatalf("expected 4 calls, got %d", len(fr.calls))
 	}
-	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
-	assertCall(t, fr.calls[1], "/staging", "pull", "--rebase")
-	assertCall(t, fr.calls[2], "/staging", "add", "-A")
-	assertCall(t, fr.calls[3], "/staging", "diff", "--cached", "--quiet")
-	assertCall(t, fr.calls[4], "/staging", "commit", "-m", "test commit")
-	assertCall(t, fr.calls[5], "/staging", "push")
+	assertCall(t, fr.calls[0], "/staging", "add", "-A")
+	assertCall(t, fr.calls[1], "/staging", "diff", "--cached", "--quiet")
+	assertCall(t, fr.calls[2], "/staging", "commit", "-m", "test commit")
+	assertCall(t, fr.calls[3], "/staging", "push")
 }
 
 func TestPushRetriesAfterPull(t *testing.T) {
 	fr := &fakeRunner{responses: []fakeResp{
-		okResp("abc123\n"),  // rev-parse HEAD (inside pre-push Pull)
-		okResp(""),          // pull --rebase
 		okResp(""),          // add -A
 		errResp("has diff"), // diff --cached --quiet
 		okResp(""),          // commit -m
-		errResp("rejected"), // push (fails — remote diverged after pre-pull)
+		errResp("rejected"), // push (fails — remote diverged)
 		okResp("abc123\n"),  // rev-parse HEAD (inside retry Pull)
 		okResp(""),          // pull --rebase
 		okResp(""),          // push (retry)
@@ -175,27 +169,23 @@ func TestPushRetriesAfterPull(t *testing.T) {
 		t.Fatalf("Push: %v", err)
 	}
 
-	if len(fr.calls) != 9 {
-		t.Fatalf("expected 9 calls, got %d: %v", len(fr.calls), fr.calls)
+	if len(fr.calls) != 7 {
+		t.Fatalf("expected 7 calls, got %d: %v", len(fr.calls), fr.calls)
 	}
-	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
-	assertCall(t, fr.calls[1], "/staging", "pull", "--rebase")
-	assertCall(t, fr.calls[2], "/staging", "add", "-A")
-	assertCall(t, fr.calls[3], "/staging", "diff", "--cached", "--quiet")
-	assertCall(t, fr.calls[4], "/staging", "commit", "-m", "test commit")
-	assertCall(t, fr.calls[5], "/staging", "push")
-	assertCall(t, fr.calls[6], "/staging", "rev-parse", "HEAD")
-	assertCall(t, fr.calls[7], "/staging", "pull", "--rebase")
-	assertCall(t, fr.calls[8], "/staging", "push")
+	assertCall(t, fr.calls[0], "/staging", "add", "-A")
+	assertCall(t, fr.calls[1], "/staging", "diff", "--cached", "--quiet")
+	assertCall(t, fr.calls[2], "/staging", "commit", "-m", "test commit")
+	assertCall(t, fr.calls[3], "/staging", "push")
+	assertCall(t, fr.calls[4], "/staging", "rev-parse", "HEAD")
+	assertCall(t, fr.calls[5], "/staging", "pull", "--rebase")
+	assertCall(t, fr.calls[6], "/staging", "push")
 }
 
 func TestPushSkipsCommitWhenNothingStaged(t *testing.T) {
 	fr := &fakeRunner{responses: []fakeResp{
-		okResp("abc123\n"), // rev-parse HEAD
-		okResp(""),         // pull --rebase
-		okResp(""),         // add -A
-		okResp(""),         // diff --cached --quiet → exit 0 means nothing staged
-		okResp(""),         // push
+		okResp(""), // add -A
+		okResp(""), // diff --cached --quiet → exit 0 means nothing staged
+		okResp(""), // push
 	}}
 	g := &Git{stagingDir: "/staging", runner: fr.run}
 
@@ -203,14 +193,12 @@ func TestPushSkipsCommitWhenNothingStaged(t *testing.T) {
 		t.Fatalf("Push: %v", err)
 	}
 
-	if len(fr.calls) != 5 {
-		t.Fatalf("expected 5 calls (no commit, still push), got %d: %v", len(fr.calls), fr.calls)
+	if len(fr.calls) != 3 {
+		t.Fatalf("expected 3 calls (no commit, still push), got %d: %v", len(fr.calls), fr.calls)
 	}
-	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
-	assertCall(t, fr.calls[1], "/staging", "pull", "--rebase")
-	assertCall(t, fr.calls[2], "/staging", "add", "-A")
-	assertCall(t, fr.calls[3], "/staging", "diff", "--cached", "--quiet")
-	assertCall(t, fr.calls[4], "/staging", "push")
+	assertCall(t, fr.calls[0], "/staging", "add", "-A")
+	assertCall(t, fr.calls[1], "/staging", "diff", "--cached", "--quiet")
+	assertCall(t, fr.calls[2], "/staging", "push")
 }
 
 func TestPullSendsRebaseCommand(t *testing.T) {

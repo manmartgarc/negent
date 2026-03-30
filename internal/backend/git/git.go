@@ -106,11 +106,6 @@ func (g *Git) Init(ctx context.Context, cfg backend.BackendConfig) error {
 }
 
 func (g *Git) Push(ctx context.Context, msg string) error {
-	// Safety-first flow: always rebase on top of latest remote before mutating.
-	if err := g.Pull(ctx); err != nil {
-		return fmt.Errorf("pre-push pull failed: %w", err)
-	}
-
 	if err := g.run(ctx, g.stagingDir, "add", "-A"); err != nil {
 		return err
 	}
