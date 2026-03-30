@@ -9,6 +9,7 @@ go build -o negent .          # Build binary
 go test ./...                  # Run all tests
 go test ./internal/sync/       # Run tests for a single package
 go test ./internal/sync/ -run TestPushPull  # Run a single test
+go test -cover ./...           # Run tests with coverage
 go vet ./...                   # Lint
 ```
 
