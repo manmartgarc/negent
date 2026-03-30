@@ -186,7 +186,7 @@ func TestPull(t *testing.T) {
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), syncTypes); err != nil {
+	if _, err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 
@@ -213,7 +213,8 @@ func TestPullConflict(t *testing.T) {
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), syncTypes); err != nil {
+	result, err := orch.Pull(context.Background(), syncTypes)
+	if err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 
@@ -225,6 +226,68 @@ func TestPullConflict(t *testing.T) {
 	// CLAUDE.md differs from base → conflict → must NOT be placed.
 	if placed["CLAUDE.md"] {
 		t.Error("CLAUDE.md should not be placed (local diverged from base)")
+	}
+
+	// Conflict must be reported in PullResult.
+	if len(result.Conflicts) != 1 || result.Conflicts[0].RelPath != "CLAUDE.md" {
+		t.Errorf("expected 1 conflict for CLAUDE.md, got %+v", result.Conflicts)
+	}
+}
+
+func TestConflictsDetected(t *testing.T) {
+	be := newMockBackend(t)
+
+	// Staging has base content.
+	agentDir := filepath.Join(be.StagingDir(), "claude")
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("base content"), 0o644)
+
+	// Local has been edited.
+	ag := newMockAgent(t, "claude", nil)
+	os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("local changes"), 0o644)
+
+	agents := map[string]agent.Agent{"claude": ag}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
+
+	orch := NewOrchestrator(be, agents)
+	conflicts, err := orch.Conflicts(syncTypes)
+	if err != nil {
+		t.Fatalf("Conflicts: %v", err)
+	}
+
+	if len(conflicts) != 1 {
+		t.Fatalf("expected 1 conflict, got %d", len(conflicts))
+	}
+	if conflicts[0].RelPath != "CLAUDE.md" {
+		t.Errorf("expected conflict for CLAUDE.md, got %s", conflicts[0].RelPath)
+	}
+	if conflicts[0].Agent != "claude" {
+		t.Errorf("expected agent claude, got %s", conflicts[0].Agent)
+	}
+}
+
+func TestConflictsNone(t *testing.T) {
+	be := newMockBackend(t)
+
+	// Staging and local have identical content — no conflict.
+	agentDir := filepath.Join(be.StagingDir(), "claude")
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("same content"), 0o644)
+
+	ag := newMockAgent(t, "claude", nil)
+	os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("same content"), 0o644)
+
+	agents := map[string]agent.Agent{"claude": ag}
+	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
+
+	orch := NewOrchestrator(be, agents)
+	conflicts, err := orch.Conflicts(syncTypes)
+	if err != nil {
+		t.Fatalf("Conflicts: %v", err)
+	}
+
+	if len(conflicts) != 0 {
+		t.Errorf("expected no conflicts, got %d: %+v", len(conflicts), conflicts)
 	}
 }
 
@@ -243,7 +306,7 @@ func TestPullNoConflict(t *testing.T) {
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), syncTypes); err != nil {
+	if _, err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 
@@ -273,7 +336,7 @@ func TestPullNewRemoteFile(t *testing.T) {
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), syncTypes); err != nil {
+	if _, err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 
@@ -496,7 +559,7 @@ func TestPullNoData(t *testing.T) {
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), syncTypes); err != nil {
+	if _, err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull with no remote data: %v", err)
 	}
 	if len(ag.placedFiles) != 0 {
@@ -532,7 +595,7 @@ func TestPullMergesAppendOnlyFiles(t *testing.T) {
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), syncTypes); err != nil {
+	if _, err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 
@@ -584,7 +647,7 @@ func TestPullCanonicalizesHistoryJSONL(t *testing.T) {
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), syncTypes); err != nil {
+	if _, err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 
@@ -678,7 +741,7 @@ func TestPullAppendOnlyNeverConflicts(t *testing.T) {
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
 
 	orch := NewOrchestrator(be, agents)
-	if err := orch.Pull(context.Background(), syncTypes); err != nil {
+	if _, err := orch.Pull(context.Background(), syncTypes); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 

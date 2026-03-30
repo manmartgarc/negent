@@ -257,11 +257,97 @@ func (o *Orchestrator) Push(ctx context.Context, syncTypes map[string][]agent.Sy
 	return o.backend.Push(ctx, msg)
 }
 
+// PullResult summarises the outcome of a Pull operation.
+type PullResult struct {
+	Placed    int
+	Merged    int
+	Skipped   int
+	Conflicts []ConflictInfo
+}
+
+// ConflictInfo describes a single file that could not be placed due to a conflict.
+// LocalPath and StagingPath are absolute paths.
+type ConflictInfo struct {
+	Agent       string
+	RelPath     string
+	LocalPath   string
+	StagingPath string
+}
+
+// Conflicts returns all files that are currently in conflict: present in staging,
+// present locally, and differing — without performing a pull.
+func (o *Orchestrator) Conflicts(syncTypes map[string][]agent.SyncType) ([]ConflictInfo, error) {
+	stagingDir := o.backend.StagingDir()
+	base := snapshotBase(stagingDir, o.agents, syncTypes)
+	var all []ConflictInfo
+
+	for name, ag := range o.agents {
+		types, ok := syncTypes[name]
+		if !ok {
+			continue
+		}
+		agentDir := filepath.Join(stagingDir, name)
+		conflicts, err := detectConflicts(name, ag, agentDir, types, base[name])
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, conflicts...)
+	}
+	return all, nil
+}
+
+// detectConflicts walks an agent's staging directory and returns files where
+// the local version differs from both the base snapshot and the staging content.
+// Project files and append-only files are excluded.
+func detectConflicts(agentName string, ag agent.Agent, agentDir string, types []agent.SyncType, agentBase map[string][]byte) ([]ConflictInfo, error) {
+	typeSet := agent.SyncTypeSet(types)
+	specMap := agent.SyncTypeMap(ag)
+	var conflicts []ConflictInfo
+
+	err := filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		relPath, _ := filepath.Rel(agentDir, path)
+		relPath = filepath.ToSlash(relPath)
+		if strings.HasPrefix(relPath, "projects/") {
+			return nil
+		}
+		syncType := ag.SyncTypeForPath(relPath)
+		if syncType == "" || !typeSet[syncType] {
+			return nil
+		}
+		if agent.LookupMode(specMap, syncType) == agent.SyncModeAppendOnly {
+			return nil
+		}
+		localContent, err := os.ReadFile(filepath.Join(ag.SourceDir(), relPath))
+		if err != nil {
+			return nil // local absent — not a conflict
+		}
+		baseContent, hasBase := agentBase[relPath]
+		stagingContent, _ := os.ReadFile(path)
+		isConflict := !hasBase || (!bytes.Equal(localContent, baseContent) && !bytes.Equal(localContent, stagingContent))
+		if isConflict {
+			conflicts = append(conflicts, ConflictInfo{
+				Agent:       agentName,
+				RelPath:     relPath,
+				LocalPath:   filepath.Join(ag.SourceDir(), relPath),
+				StagingPath: path,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking staging for %s: %w", agentName, err)
+	}
+	return conflicts, nil
+}
+
 // Pull fetches from the backend and places files into agent source directories.
 // Conflict detection: any non-project file where local differs from the staged
 // base (the last synced remote state) is skipped and reported. This protects
 // local edits regardless of whether the remote also changed the file.
-func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.SyncType) error {
+func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.SyncType) (*PullResult, error) {
 	stagingDir := o.backend.StagingDir()
 
 	// Snapshot staged content for non-project files before the working tree is
@@ -271,8 +357,10 @@ func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.Sy
 
 	// Integrate remote changes into the working tree.
 	if err := o.backend.Pull(ctx); err != nil {
-		return fmt.Errorf("pulling from backend: %w", err)
+		return nil, fmt.Errorf("pulling from backend: %w", err)
 	}
+
+	var pullResult PullResult
 
 	for name, ag := range o.agents {
 		types, ok := syncTypes[name]
@@ -311,52 +399,37 @@ func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.Sy
 			return nil
 		})
 		if err != nil {
-			return fmt.Errorf("walking staging dir for %s: %w", name, err)
+			return nil, fmt.Errorf("walking staging dir for %s: %w", name, err)
 		}
 
-		agentBase := base[name]
 		specMap := agent.SyncTypeMap(ag)
+
+		// Detect conflicts using the shared helper.
+		conflicts, err := detectConflicts(name, ag, agentDir, types, base[name])
+		if err != nil {
+			return nil, err
+		}
+		conflictSet := make(map[string]bool, len(conflicts))
+		for _, c := range conflicts {
+			conflictSet[c.RelPath] = true
+		}
+
 		var safeFiles []agent.SyncFile
 		var appendOnlyFiles []agent.SyncFile
-		var conflicts []string
-
 		for _, f := range files {
-			// Project files: pass through to Place() for path-encoded matching.
 			if strings.HasPrefix(f.StagingPath, "projects/") {
 				safeFiles = append(safeFiles, f)
 				continue
 			}
-
 			syncType := ag.SyncTypeForPath(f.RelPath)
-
-			// Append-only files are always merged, never conflicted.
 			if agent.LookupMode(specMap, syncType) == agent.SyncModeAppendOnly {
 				appendOnlyFiles = append(appendOnlyFiles, f)
 				continue
 			}
-
-			localContent, err := os.ReadFile(filepath.Join(ag.SourceDir(), f.RelPath))
-			if err != nil {
-				// Local file absent — new file from remote; safe to place.
-				safeFiles = append(safeFiles, f)
+			if conflictSet[f.RelPath] {
 				continue
 			}
-
-			baseContent, hasBase := agentBase[f.StagingPath]
-			if !hasBase {
-				// No prior base but local exists — remote added a file that
-				// collides with a local file. Protect local to avoid silent loss.
-				conflicts = append(conflicts, f.StagingPath)
-				continue
-			}
-
-			if bytes.Equal(localContent, baseContent) {
-				// Local matches base — no local edits; safe to accept remote version.
-				safeFiles = append(safeFiles, f)
-			} else {
-				// Local differs from base — user has unsaved local changes; protect.
-				conflicts = append(conflicts, f.StagingPath)
-			}
+			safeFiles = append(safeFiles, f)
 		}
 
 		// Merge append-only files from staging into local.
@@ -364,21 +437,26 @@ func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.Sy
 			src := filepath.Join(agentDir, f.StagingPath)
 			dst := filepath.Join(ag.SourceDir(), f.RelPath)
 			if err := mergeAppendOnly(src, dst); err != nil {
-				return fmt.Errorf("merging append-only %s: %w", f.RelPath, err)
+				return nil, fmt.Errorf("merging append-only %s: %w", f.RelPath, err)
 			}
 		}
 
 		if len(conflicts) > 0 {
-			fmt.Printf("  %s: %d conflict(s) — keeping local version:\n", name, len(conflicts))
+			fmt.Printf("  %s: %d conflict(s) — run 'negent conflicts' to resolve:\n", name, len(conflicts))
 			for _, c := range conflicts {
-				fmt.Printf("    CONFLICT: %s\n", c)
+				fmt.Printf("    CONFLICT: %s\n", c.RelPath)
 			}
 		}
 
 		result, err := ag.Place(agentDir, safeFiles)
 		if err != nil {
-			return fmt.Errorf("placing files for %s: %w", name, err)
+			return nil, fmt.Errorf("placing files for %s: %w", name, err)
 		}
+
+		pullResult.Placed += result.Placed
+		pullResult.Merged += len(appendOnlyFiles)
+		pullResult.Skipped += result.Skipped
+		pullResult.Conflicts = append(pullResult.Conflicts, conflicts...)
 
 		fmt.Printf("  %s: %d placed, %d merged, %d skipped", name, result.Placed, len(appendOnlyFiles), result.Skipped)
 		if len(result.Unmatched) > 0 {
@@ -387,7 +465,7 @@ func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.Sy
 		fmt.Println()
 	}
 
-	return nil
+	return &pullResult, nil
 }
 
 // mergeAppendOnly merges an append-only file (like session JSONL) from src into

@@ -45,7 +45,9 @@ Coordinates multi-agent sync with conflict detection. **Push** collects files fr
 YAML config at `~/.config/negent/config.yaml`. Stores backend type, repo URL, machine name, and per-agent settings (source dir, sync types, manual project links).
 
 ### CLI (`cmd/`)
-Cobra commands: `init` (interactive setup via charmbracelet/huh), `add`, `push`, `pull`, `status`, `link`.
+Cobra commands: `init` (interactive setup via charmbracelet/huh), `add`, `push`, `pull`, `status`, `link`, `conflicts`.
+
+The CLI is interactive by default (e.g., `init` uses TUI prompts, `conflicts` opens an interactive resolver) but every command must also be fully usable non-interactively via flags. This allows scripting, CI usage, and piping. For example, `conflicts --list` lists without prompting, `conflicts --keep-remote` resolves all without interaction.
 
 ## Key Patterns
 
