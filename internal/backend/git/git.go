@@ -16,9 +16,9 @@ const BackendName = "git"
 
 // ConflictError indicates git reported a content conflict while rebasing.
 type ConflictError struct {
+	Err     error
 	Command string
 	Files   []string
-	Err     error
 }
 
 func (e *ConflictError) Error() string {
@@ -36,9 +36,9 @@ type runnerFn func(ctx context.Context, dir string, args ...string) ([]byte, err
 
 // Git implements backend.Backend using a local git clone.
 type Git struct {
+	runner     runnerFn
 	remote     string
 	stagingDir string
-	runner     runnerFn
 }
 
 // New creates a new Git backend. The stagingDir is where the repo will be
@@ -81,7 +81,13 @@ func DefaultStagingDir() string {
 		}
 	}
 	// Default: ~/.local/share/negent/repo (Linux standard)
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = os.Getenv("HOME")
+	}
+	if home == "" {
+		home = os.TempDir()
+	}
 	return filepath.Join(home, ".local", "share", "negent", "repo")
 }
 
@@ -203,16 +209,21 @@ func (g *Git) Pull(ctx context.Context) error {
 	if mergeInProgress == nil || applyInProgress == nil {
 		// Try to continue first; if that fails, abort so we're on a clean branch.
 		if err := g.run(ctx, g.stagingDir, "rebase", "--continue"); err != nil {
-			_ = g.run(ctx, g.stagingDir, "rebase", "--abort")
+			if abortErr := g.run(ctx, g.stagingDir, "rebase", "--abort"); abortErr != nil {
+				return fmt.Errorf("recovering interrupted rebase: continue failed: %v; abort failed: %w", err, abortErr)
+			}
 		}
 	}
 	// Keep linear history and rely on git's default conflict behavior.
 	out, err := g.runner(ctx, g.stagingDir, "pull", "--rebase")
 	if err != nil {
 		conflicts, conflictsErr := g.conflictedFiles(ctx)
-		// Leave staging clean on conflict so future commands can proceed.
-		_ = g.run(ctx, g.stagingDir, "rebase", "--abort")
-		if (conflictsErr == nil && len(conflicts) > 0) || looksLikeConflict(out, err) {
+		isConflict := (conflictsErr == nil && len(conflicts) > 0) || looksLikeConflict(out, err)
+		if isConflict {
+			// Leave staging clean on conflict so future commands can proceed.
+			if abortErr := g.run(ctx, g.stagingDir, "rebase", "--abort"); abortErr != nil && !isNoRebaseInProgressError(abortErr) {
+				return fmt.Errorf("aborting rebase after failed pull: %w", abortErr)
+			}
 			return &ConflictError{
 				Command: "pull --rebase",
 				Files:   conflicts,
@@ -290,4 +301,9 @@ func looksLikeConflict(out []byte, err error) bool {
 		msg += "\n" + strings.ToLower(err.Error())
 	}
 	return strings.Contains(msg, "conflict") || strings.Contains(msg, "could not apply")
+}
+
+func isNoRebaseInProgressError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no rebase in progress")
 }

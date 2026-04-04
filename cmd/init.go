@@ -69,7 +69,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	hostname, _ := os.Hostname()
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		hostname = "this-machine"
+	}
 	machineName := initMachineFlag
 	if machineName == "" && !initNonInteractiveFlag {
 		machineName, err = promptMachineName(hostname)

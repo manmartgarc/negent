@@ -10,6 +10,13 @@ import (
 	"github.com/manmart/negent/internal/backend"
 )
 
+func mustNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNew(t *testing.T) {
 	c := New("/tmp/test-claude")
 	if c.Name() != "claude" {
@@ -144,17 +151,17 @@ func setupTestDir(t *testing.T) string {
 	writeFile(t, filepath.Join(dir, "settings.local.json"), `{}`)
 
 	// Custom code
-	os.MkdirAll(filepath.Join(dir, "skills", "my-skill"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(dir, "skills", "my-skill"), 0o755))
 	writeFile(t, filepath.Join(dir, "skills", "my-skill", "skill.md"), "# Skill")
-	os.MkdirAll(filepath.Join(dir, "plugins", "my-plugin"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(dir, "plugins", "my-plugin"), 0o755))
 	writeFile(t, filepath.Join(dir, "plugins", "my-plugin", "plugin.json"), `{"name":"my-plugin"}`)
-	os.MkdirAll(filepath.Join(dir, "plugins", "marketplaces", "claude-plugins-official"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(dir, "plugins", "marketplaces", "claude-plugins-official"), 0o755))
 	writeFile(t, filepath.Join(dir, "plugins", "marketplaces", "claude-plugins-official", "README.md"), "# Catalog")
 	writeFile(t, filepath.Join(dir, "plugins", "install-counts-cache.json"), `{"version":1}`)
 
 	// Memory (project dirs)
 	projDir := filepath.Join(dir, "projects", "-home-user-repos-myproject")
-	os.MkdirAll(filepath.Join(projDir, "memory"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(projDir, "memory"), 0o755))
 	writeFile(t, filepath.Join(projDir, "memory", "MEMORY.md"), "# Memory")
 	writeFile(t, filepath.Join(projDir, "memory", "context.md"), "context")
 
@@ -163,9 +170,9 @@ func setupTestDir(t *testing.T) string {
 
 	// Excluded stuff
 	writeFile(t, filepath.Join(dir, ".credentials.json"), "secret")
-	os.MkdirAll(filepath.Join(dir, "telemetry"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(dir, "telemetry"), 0o755))
 	writeFile(t, filepath.Join(dir, "telemetry", "data.json"), "telemetry")
-	os.MkdirAll(filepath.Join(dir, "cache"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(dir, "cache"), 0o755))
 	writeFile(t, filepath.Join(dir, "cache", "cached.json"), "cache")
 
 	return dir
@@ -173,7 +180,7 @@ func setupTestDir(t *testing.T) string {
 
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
-	os.MkdirAll(filepath.Dir(path), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +437,7 @@ func setupPlaceTest(t *testing.T) (localDir, stagingDir string) {
 
 	// Create a local project dir (simulating user already has this project)
 	projDir := filepath.Join(localDir, "projects", "-home-user-repos-myproject")
-	os.MkdirAll(filepath.Join(projDir, "memory"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(projDir, "memory"), 0o755))
 
 	return localDir, stagingDir
 }
@@ -607,12 +614,12 @@ func setupCrossMachineTest(t *testing.T) (localDir, stagingDir string) {
 
 	// Local project (Linux encoding)
 	localProj := filepath.Join(localDir, "projects", "-home-user-repos-myproject")
-	os.MkdirAll(filepath.Join(localProj, "memory"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(localProj, "memory"), 0o755))
 	writeFile(t, filepath.Join(localProj, "memory", "MEMORY.md"), "local memory")
 
 	// Staging project (simulates macOS encoding with sidecar)
 	stagingProj := filepath.Join(stagingDir, "projects", "-Users-otheruser-repos-myproject")
-	os.MkdirAll(filepath.Join(stagingProj, "memory"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(stagingProj, "memory"), 0o755))
 	writeFile(t, filepath.Join(stagingProj, "memory", "MEMORY.md"), "remote memory")
 	writeFile(t, filepath.Join(stagingProj, "memory", "remote-only.md"), "remote only file")
 
@@ -621,7 +628,8 @@ func setupCrossMachineTest(t *testing.T) (localDir, stagingDir string) {
 		Segments:     []string{"Users", "otheruser", "repos", "myproject"},
 		OS:           "darwin",
 	}
-	data, _ := json.Marshal(sidecar)
+	data, err := json.Marshal(sidecar)
+	mustNoErr(t, err)
 	writeFile(t, filepath.Join(stagingDir, "projects", "-Users-otheruser-repos-myproject.meta.json"), string(data))
 
 	return localDir, stagingDir
@@ -636,7 +644,8 @@ func TestListStagingProjects(t *testing.T) {
 		GitRemote:    "https://github.com/user/myproject.git",
 		OS:           "linux",
 	}
-	data, _ := json.Marshal(sidecar)
+	data, err := json.Marshal(sidecar)
+	mustNoErr(t, err)
 	writeFile(t, filepath.Join(stagingDir, "projects", "-home-user-repos-myproject.meta.json"), string(data))
 
 	projects, err := listStagingProjects(stagingDir)
@@ -787,12 +796,12 @@ func TestDiffSidecarOnlyNoPhantomChanges(t *testing.T) {
 
 	// Local project (Linux encoding — same machine that pushed)
 	localProj := filepath.Join(localDir, "projects", "-home-user-repos-myproject")
-	os.MkdirAll(filepath.Join(localProj, "memory"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(localProj, "memory"), 0o755))
 	writeFile(t, filepath.Join(localProj, "memory", "MEMORY.md"), "my memory")
 
 	// Staging has content under the SAME Linux encoding (pushed from this machine)
 	stagingProj := filepath.Join(stagingDir, "projects", "-home-user-repos-myproject")
-	os.MkdirAll(filepath.Join(stagingProj, "memory"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(stagingProj, "memory"), 0o755))
 	writeFile(t, filepath.Join(stagingProj, "memory", "MEMORY.md"), "my memory")
 
 	// Linux sidecar
@@ -801,7 +810,8 @@ func TestDiffSidecarOnlyNoPhantomChanges(t *testing.T) {
 		Segments:     []string{"home", "user", "repos", "myproject"},
 		OS:           "linux",
 	}
-	data, _ := json.MarshalIndent(linuxSidecar, "", "  ")
+	data, err := json.MarshalIndent(linuxSidecar, "", "  ")
+	mustNoErr(t, err)
 	writeFile(t, filepath.Join(stagingDir, "projects", "-home-user-repos-myproject.meta.json"), string(data))
 
 	// macOS sidecar exists but NO corresponding macOS directory in staging
@@ -810,7 +820,8 @@ func TestDiffSidecarOnlyNoPhantomChanges(t *testing.T) {
 		Segments:     []string{"Users", "otheruser", "repos", "myproject"},
 		OS:           "darwin",
 	}
-	data, _ = json.MarshalIndent(macSidecar, "", "  ")
+	data, err = json.MarshalIndent(macSidecar, "", "  ")
+	mustNoErr(t, err)
 	writeFile(t, filepath.Join(stagingDir, "projects", "-Users-otheruser-repos-myproject.meta.json"), string(data))
 
 	c := New(localDir)

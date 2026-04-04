@@ -62,7 +62,10 @@ func (o *Orchestrator) Plan(ctx context.Context, syncTypes map[string][]agent.Sy
 		return nil, fmt.Errorf("reading fetched files: %w", err)
 	}
 
-	base := snapshotBase(stagingDir, o.agents, syncTypes)
+	base, err := snapshotBase(stagingDir, o.agents, syncTypes)
+	if err != nil {
+		return nil, fmt.Errorf("snapshotting base state: %w", err)
+	}
 
 	// Group remote changes by agent to avoid O(agents × remoteChanges).
 	remoteByAgent := make(map[string][]backend.FileChange)
@@ -214,11 +217,14 @@ func (o *Orchestrator) Push(ctx context.Context, syncTypes map[string][]agent.Sy
 		typeSet := agent.SyncTypeSet(types)
 
 		deleted := 0
-		filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
+		if err := filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
 			}
-			relPath, _ := filepath.Rel(agentDir, path)
+			relPath, err := filepath.Rel(agentDir, path)
+			if err != nil {
+				return fmt.Errorf("computing path relative to agent dir: %w", err)
+			}
 			relPath = filepath.ToSlash(relPath)
 			if collectedPaths[relPath] {
 				return nil
@@ -244,7 +250,9 @@ func (o *Orchestrator) Push(ctx context.Context, syncTypes map[string][]agent.Sy
 			}
 			deleted++
 			return nil
-		})
+		}); err != nil {
+			return fmt.Errorf("walking staged files for %s: %w", name, err)
+		}
 
 		fmt.Printf("  %s: %d files collected", name, len(files))
 		if deleted > 0 {
@@ -259,10 +267,10 @@ func (o *Orchestrator) Push(ctx context.Context, syncTypes map[string][]agent.Sy
 
 // PullResult summarises the outcome of a Pull operation.
 type PullResult struct {
+	Conflicts []ConflictInfo
 	Placed    int
 	Merged    int
 	Skipped   int
-	Conflicts []ConflictInfo
 }
 
 // ConflictInfo describes a single file that could not be placed due to a conflict.
@@ -278,7 +286,10 @@ type ConflictInfo struct {
 // present locally, and differing — without performing a pull.
 func (o *Orchestrator) Conflicts(syncTypes map[string][]agent.SyncType) ([]ConflictInfo, error) {
 	stagingDir := o.backend.StagingDir()
-	base := snapshotBase(stagingDir, o.agents, syncTypes)
+	base, err := snapshotBase(stagingDir, o.agents, syncTypes)
+	if err != nil {
+		return nil, fmt.Errorf("snapshotting base state: %w", err)
+	}
 	var all []ConflictInfo
 
 	for name, ag := range o.agents {
@@ -308,7 +319,10 @@ func detectConflicts(agentName string, ag agent.Agent, agentDir string, types []
 		if err != nil || d.IsDir() {
 			return err
 		}
-		relPath, _ := filepath.Rel(agentDir, path)
+		relPath, err := filepath.Rel(agentDir, path)
+		if err != nil {
+			return fmt.Errorf("computing path relative to agent dir: %w", err)
+		}
 		relPath = filepath.ToSlash(relPath)
 		if strings.HasPrefix(relPath, "projects/") {
 			return nil
@@ -325,7 +339,10 @@ func detectConflicts(agentName string, ag agent.Agent, agentDir string, types []
 			return nil // local absent — not a conflict
 		}
 		baseContent, hasBase := agentBase[relPath]
-		stagingContent, _ := os.ReadFile(path)
+		stagingContent, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading staged file %s: %w", relPath, err)
+		}
 		isConflict := !hasBase || (!bytes.Equal(localContent, baseContent) && !bytes.Equal(localContent, stagingContent))
 		if isConflict {
 			conflicts = append(conflicts, ConflictInfo{
@@ -353,7 +370,10 @@ func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.Sy
 	// Snapshot staged content for non-project files before the working tree is
 	// updated. This is the base: the last remote state this machine synced to.
 	// Project dirs use path-encoded names; Place() handles matching for those.
-	base := snapshotBase(stagingDir, o.agents, syncTypes)
+	base, err := snapshotBase(stagingDir, o.agents, syncTypes)
+	if err != nil {
+		return nil, fmt.Errorf("snapshotting base state: %w", err)
+	}
 
 	// Integrate remote changes into the working tree.
 	if err := o.backend.Pull(ctx); err != nil {
@@ -383,7 +403,10 @@ func (o *Orchestrator) Pull(ctx context.Context, syncTypes map[string][]agent.Sy
 			if err != nil || d.IsDir() {
 				return err
 			}
-			relPath, _ := filepath.Rel(agentDir, path)
+			relPath, err := filepath.Rel(agentDir, path)
+			if err != nil {
+				return fmt.Errorf("computing path relative to agent dir: %w", err)
+			}
 			relPath = filepath.ToSlash(relPath)
 			syncType := ag.SyncTypeForPath(relPath)
 			if syncType == "" {
@@ -481,7 +504,13 @@ func mergeAppendOnly(src, dst string) error {
 		return err
 	}
 
-	dstData, _ := os.ReadFile(dst) // ignore error: dst may not exist yet
+	dstData, err := os.ReadFile(dst)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		dstData = nil
+	}
 
 	if len(dstData) == 0 {
 		if filepath.Base(dst) == "history.jsonl" || filepath.Base(src) == "history.jsonl" {
@@ -561,30 +590,43 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-func snapshotBase(stagingDir string, agents map[string]agent.Agent, syncTypes map[string][]agent.SyncType) map[string]map[string][]byte {
+func snapshotBase(stagingDir string, agents map[string]agent.Agent, syncTypes map[string][]agent.SyncType) (map[string]map[string][]byte, error) {
 	base := make(map[string]map[string][]byte)
 	for name := range agents {
 		if _, ok := syncTypes[name]; !ok {
 			continue
 		}
 		agentDir := filepath.Join(stagingDir, name)
+		if _, err := os.Stat(agentDir); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("stating %s staging dir: %w", name, err)
+		}
 		base[name] = make(map[string][]byte)
-		filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
+		if err := filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
 			}
-			relPath, _ := filepath.Rel(agentDir, path)
+			relPath, err := filepath.Rel(agentDir, path)
+			if err != nil {
+				return fmt.Errorf("computing path relative to agent dir: %w", err)
+			}
 			relPath = filepath.ToSlash(relPath)
 			if strings.HasPrefix(relPath, "projects/") {
 				return nil
 			}
-			if content, err := os.ReadFile(path); err == nil {
-				base[name][relPath] = content
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("reading staged file %s: %w", relPath, err)
 			}
+			base[name][relPath] = content
 			return nil
-		})
+		}); err != nil {
+			return nil, fmt.Errorf("walking staging dir for %s: %w", name, err)
+		}
 	}
-	return base
+	return base, nil
 }
 
 func splitAgentPath(path string) (agentName string, relPath string, ok bool) {

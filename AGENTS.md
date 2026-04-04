@@ -11,9 +11,14 @@ go test ./internal/sync/       # Run tests for a single package
 go test ./internal/sync/ -run TestPushPull  # Run a single test
 go test -cover ./...           # Run tests with coverage
 go vet ./...                   # Lint
+
+# Run GitHub Actions locally (requires nektos/act as a gh CLI plugin)
+gh act -l                      # List available workflows
+gh act                         # Run CI workflow locally
+gh act --job build-test-vet    # Run a specific job
 ```
 
-No Makefile, CI config, or linter config exists yet — standard `go` toolchain only.
+No Makefile — standard `go` toolchain only.
 
 ## Architecture
 

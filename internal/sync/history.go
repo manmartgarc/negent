@@ -11,9 +11,9 @@ import (
 // historyEntry represents a single line in a history.jsonl file.
 // We only parse the fields needed for deduplication and sorting.
 type historyEntry struct {
-	Timestamp int64  `json:"timestamp"`
 	SessionID string `json:"sessionId"`
-	raw       string // original JSON line, preserved verbatim
+	raw       string
+	Timestamp int64 `json:"timestamp"`
 }
 
 // dedupKey returns a unique key for deduplication.

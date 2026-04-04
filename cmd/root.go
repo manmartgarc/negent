@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/manmart/negent/internal/config"
 	"github.com/spf13/cobra"
+
+	"github.com/manmart/negent/internal/config"
 )
 
 var cfgFile string

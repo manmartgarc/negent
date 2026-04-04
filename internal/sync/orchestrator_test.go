@@ -14,11 +14,11 @@ import (
 // mockBackend implements backend.Backend for testing.
 type mockBackend struct {
 	stagingDir   string
+	lastMsg      string
+	fetchedFiles []backend.FileChange
 	pushed       bool
 	pulled       bool
 	fetched      bool
-	lastMsg      string
-	fetchedFiles []backend.FileChange
 }
 
 func newMockBackend(t *testing.T) *mockBackend {
@@ -58,15 +58,22 @@ const (
 	mockTypeSessions = agent.SyncType("sessions")
 )
 
-func newMockAgent(t *testing.T, name string, files []agent.SyncFile) *mockAgent {
+func mustNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newMockAgent(t *testing.T, files []agent.SyncFile) *mockAgent {
 	dir := t.TempDir()
 	// Create the actual files so copyFile works
 	for _, f := range files {
 		path := filepath.Join(dir, f.RelPath)
-		os.MkdirAll(filepath.Dir(path), 0o755)
-		os.WriteFile(path, []byte("test content for "+f.RelPath), 0o644)
+		mustNoErr(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		mustNoErr(t, os.WriteFile(path, []byte("test content for "+f.RelPath), 0o644))
 	}
-	return &mockAgent{name: name, sourceDir: dir, files: files}
+	return &mockAgent{name: "claude", sourceDir: dir, files: files}
 }
 
 func (m *mockAgent) Name() string      { return m.name }
@@ -102,17 +109,22 @@ func (m *mockAgent) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backe
 	}
 
 	var changes []backend.FileChange
-	filepath.WalkDir(stagingDir, func(path string, d os.DirEntry, err error) error {
+	if err := filepath.WalkDir(stagingDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		rel, _ := filepath.Rel(stagingDir, path)
+		rel, err := filepath.Rel(stagingDir, path)
+		if err != nil {
+			return err
+		}
 		rel = filepath.ToSlash(rel)
 		if !collected[rel] {
 			changes = append(changes, backend.FileChange{Path: rel, Kind: backend.ChangeDeleted})
 		}
 		return nil
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return changes, nil
 }
 func (m *mockAgent) SyncTypeForPath(relPath string) agent.SyncType {
@@ -132,7 +144,7 @@ func TestPush(t *testing.T) {
 		{RelPath: "CLAUDE.md", StagingPath: "CLAUDE.md", Type: mockTypeClaudeMD},
 		{RelPath: "settings.json", StagingPath: "settings.json", Type: mockTypeClaudeMD},
 	}
-	ag := newMockAgent(t, "claude", files)
+	ag := newMockAgent(t, files)
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
@@ -157,7 +169,7 @@ func TestPush(t *testing.T) {
 
 func TestPushSkipsUnconfiguredAgents(t *testing.T) {
 	be := newMockBackend(t)
-	ag := newMockAgent(t, "claude", nil)
+	ag := newMockAgent(t, nil)
 
 	agents := map[string]agent.Agent{"claude": ag}
 	// Empty sync types = nothing to sync
@@ -178,10 +190,10 @@ func TestPull(t *testing.T) {
 
 	// Pre-populate staging dir with files
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("# Test"), 0o644)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("# Test"), 0o644))
 
-	ag := newMockAgent(t, "claude", nil)
+	ag := newMockAgent(t, nil)
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
@@ -200,14 +212,14 @@ func TestPullConflict(t *testing.T) {
 
 	// Populate staging with base content (the last synced remote state).
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("base content"), 0o644)
-	os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(`{"key":"val"}`), 0o644)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("base content"), 0o644))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(`{"key":"val"}`), 0o644))
 
 	// Local: CLAUDE.md edited since last sync, settings.json unchanged.
-	ag := newMockAgent(t, "claude", nil)
-	os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("local changes"), 0o644)
-	os.WriteFile(filepath.Join(ag.SourceDir(), "settings.json"), []byte(`{"key":"val"}`), 0o644)
+	ag := newMockAgent(t, nil)
+	mustNoErr(t, os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("local changes"), 0o644))
+	mustNoErr(t, os.WriteFile(filepath.Join(ag.SourceDir(), "settings.json"), []byte(`{"key":"val"}`), 0o644))
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
@@ -239,12 +251,12 @@ func TestConflictsDetected(t *testing.T) {
 
 	// Staging has base content.
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("base content"), 0o644)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("base content"), 0o644))
 
 	// Local has been edited.
-	ag := newMockAgent(t, "claude", nil)
-	os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("local changes"), 0o644)
+	ag := newMockAgent(t, nil)
+	mustNoErr(t, os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("local changes"), 0o644))
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
@@ -271,11 +283,11 @@ func TestConflictsNone(t *testing.T) {
 
 	// Staging and local have identical content — no conflict.
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("same content"), 0o644)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("same content"), 0o644))
 
-	ag := newMockAgent(t, "claude", nil)
-	os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("same content"), 0o644)
+	ag := newMockAgent(t, nil)
+	mustNoErr(t, os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("same content"), 0o644))
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
@@ -295,12 +307,12 @@ func TestPullNoConflict(t *testing.T) {
 	be := newMockBackend(t)
 
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("base content"), 0o644)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("base content"), 0o644))
 
 	// Local matches base — no local edits.
-	ag := newMockAgent(t, "claude", nil)
-	os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("base content"), 0o644)
+	ag := newMockAgent(t, nil)
+	mustNoErr(t, os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("base content"), 0o644))
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
@@ -325,11 +337,11 @@ func TestPullNewRemoteFile(t *testing.T) {
 
 	// Staging has only settings.json; CLAUDE.md is newly added by remote.
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(`{}`), 0o644)
-	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("brand new"), 0o644)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(`{}`), 0o644))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("brand new"), 0o644))
 
-	ag := newMockAgent(t, "claude", nil)
+	ag := newMockAgent(t, nil)
 	// No local CLAUDE.md — remote added it fresh.
 
 	agents := map[string]agent.Agent{"claude": ag}
@@ -360,15 +372,15 @@ func TestPlanCombinesLocalAndRemoteChanges(t *testing.T) {
 	}
 
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("base"), 0o644)
-	os.WriteFile(filepath.Join(agentDir, "old.md"), []byte("staged"), 0o644)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("base"), 0o644))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "old.md"), []byte("staged"), 0o644))
 
 	files := []agent.SyncFile{
 		{RelPath: "CLAUDE.md", StagingPath: "CLAUDE.md", Type: mockTypeClaudeMD},
 	}
-	ag := newMockAgent(t, "claude", files)
-	os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("local edits"), 0o644)
+	ag := newMockAgent(t, files)
+	mustNoErr(t, os.WriteFile(filepath.Join(ag.SourceDir(), "CLAUDE.md"), []byte("local edits"), 0o644))
 
 	orch := NewOrchestrator(be, map[string]agent.Agent{"claude": ag})
 	plan, err := orch.Plan(context.Background(), map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}})
@@ -413,13 +425,13 @@ func TestPlanTreatsProjectFilesAsDownloads(t *testing.T) {
 	}
 
 	agentDir := filepath.Join(be.StagingDir(), "claude", "projects", "myapp", "memory")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "MEMORY.md"), []byte("remote"), 0o644)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "MEMORY.md"), []byte("remote"), 0o644))
 
-	ag := newMockAgent(t, "claude", nil)
+	ag := newMockAgent(t, nil)
 	localProjectDir := filepath.Join(ag.SourceDir(), "projects", "myapp", "memory")
-	os.MkdirAll(localProjectDir, 0o755)
-	os.WriteFile(filepath.Join(localProjectDir, "MEMORY.md"), []byte("local edits"), 0o644)
+	mustNoErr(t, os.MkdirAll(localProjectDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(localProjectDir, "MEMORY.md"), []byte("local edits"), 0o644))
 
 	orch := NewOrchestrator(be, map[string]agent.Agent{"claude": ag})
 	plan, err := orch.Plan(context.Background(), map[string][]agent.SyncType{"claude": {mockTypeClaudeMD, mockTypeSessions}})
@@ -443,15 +455,15 @@ func TestPushDeletesStaleStagedFiles(t *testing.T) {
 
 	// Pre-populate staging with a file that will no longer be collected.
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(`{"old":"data"}`), 0o644)
-	os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("old"), 0o644)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(`{"old":"data"}`), 0o644))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "CLAUDE.md"), []byte("old"), 0o644))
 
 	// Agent now only collects CLAUDE.md — settings.json was removed from collection.
 	files := []agent.SyncFile{
 		{RelPath: "CLAUDE.md", StagingPath: "CLAUDE.md", Type: mockTypeClaudeMD},
 	}
-	ag := newMockAgent(t, "claude", files)
+	ag := newMockAgent(t, files)
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
@@ -480,19 +492,19 @@ func TestPushMergesSessionFiles(t *testing.T) {
 	// Pre-populate staging with a session file (as if pushed from another machine).
 	agentDir := filepath.Join(be.StagingDir(), "claude")
 	projDir := filepath.Join(agentDir, "projects", "myapp")
-	os.MkdirAll(projDir, 0o755)
+	mustNoErr(t, os.MkdirAll(projDir, 0o755))
 	stagedContent := "line-A\nline-B\nline-C\n"
-	os.WriteFile(filepath.Join(projDir, "session.jsonl"), []byte(stagedContent), 0o644)
+	mustNoErr(t, os.WriteFile(filepath.Join(projDir, "session.jsonl"), []byte(stagedContent), 0o644))
 
 	// Local session has overlapping lines (B,C) plus new lines (D,E).
 	localContent := "line-B\nline-C\nline-D\nline-E\n"
 	files := []agent.SyncFile{
 		{RelPath: "projects/myapp/session.jsonl", StagingPath: "projects/myapp/session.jsonl", Type: mockTypeSessions},
 	}
-	ag := newMockAgent(t, "claude", files)
+	ag := newMockAgent(t, files)
 	sessionPath := filepath.Join(ag.SourceDir(), "projects", "myapp")
-	os.MkdirAll(sessionPath, 0o755)
-	os.WriteFile(filepath.Join(sessionPath, "session.jsonl"), []byte(localContent), 0o644)
+	mustNoErr(t, os.MkdirAll(sessionPath, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(sessionPath, "session.jsonl"), []byte(localContent), 0o644))
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
@@ -528,10 +540,10 @@ func TestPushNewSessionCopied(t *testing.T) {
 	files := []agent.SyncFile{
 		{RelPath: "projects/myapp/session.jsonl", StagingPath: "projects/myapp/session.jsonl", Type: mockTypeSessions},
 	}
-	ag := newMockAgent(t, "claude", files)
+	ag := newMockAgent(t, files)
 	sessionPath := filepath.Join(ag.SourceDir(), "projects", "myapp")
-	os.MkdirAll(sessionPath, 0o755)
-	os.WriteFile(filepath.Join(sessionPath, "session.jsonl"), []byte(localContent), 0o644)
+	mustNoErr(t, os.MkdirAll(sessionPath, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(sessionPath, "session.jsonl"), []byte(localContent), 0o644))
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
@@ -554,7 +566,7 @@ func TestPushNewSessionCopied(t *testing.T) {
 func TestPullNoData(t *testing.T) {
 	be := newMockBackend(t)
 	// agentDir does not exist — simulates a remote with no data for this agent.
-	ag := newMockAgent(t, "claude", nil)
+	ag := newMockAgent(t, nil)
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}
 
@@ -572,24 +584,24 @@ func TestPullMergesAppendOnlyFiles(t *testing.T) {
 
 	// Pre-populate staging with an append-only file (history from another machine).
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
 	stagedContent := strings.Join([]string{
 		`{"timestamp":100,"sessionId":"sA","display":"A"}`,
 		`{"timestamp":200,"sessionId":"sB","display":"B"}`,
 		`{"timestamp":300,"sessionId":"sC","display":"C"}`,
 		"",
 	}, "\n")
-	os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte(stagedContent), 0o644)
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte(stagedContent), 0o644))
 
 	// Local history has overlapping lines (B,C) plus a local-only line (D).
-	ag := newMockAgent(t, "claude", nil)
+	ag := newMockAgent(t, nil)
 	localContent := strings.Join([]string{
 		`{"timestamp":200,"sessionId":"sB","display":"B"}`,
 		`{"timestamp":300,"sessionId":"sC","display":"C"}`,
 		`{"timestamp":400,"sessionId":"sD","display":"D"}`,
 		"",
 	}, "\n")
-	os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(localContent), 0o644)
+	mustNoErr(t, os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(localContent), 0o644))
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
@@ -628,7 +640,7 @@ func TestPullCanonicalizesHistoryJSONL(t *testing.T) {
 	be := newMockBackend(t)
 
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
 	stagedContent := strings.Join([]string{
 		"<<<<<<< HEAD",
 		`{"timestamp":200,"sessionId":"s2","display":"b"}`,
@@ -637,11 +649,11 @@ func TestPullCanonicalizesHistoryJSONL(t *testing.T) {
 		">>>>>>> branch",
 		"",
 	}, "\n")
-	os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte(stagedContent), 0o644)
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte(stagedContent), 0o644))
 
-	ag := newMockAgent(t, "claude", nil)
+	ag := newMockAgent(t, nil)
 	localContent := `{"timestamp":300,"sessionId":"s3","display":"c"}` + "\n"
-	os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(localContent), 0o644)
+	mustNoErr(t, os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(localContent), 0o644))
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
@@ -675,7 +687,7 @@ func TestPullCanonicalizesHistoryJSONL(t *testing.T) {
 func TestPushCanonicalizesLocalAndStagingHistoryJSONL(t *testing.T) {
 	be := newMockBackend(t)
 
-	ag := newMockAgent(t, "claude", []agent.SyncFile{
+	ag := newMockAgent(t, []agent.SyncFile{
 		{RelPath: "history.jsonl", StagingPath: "history.jsonl", Type: mockTypeSessions},
 	})
 	localContent := strings.Join([]string{
@@ -687,7 +699,7 @@ func TestPushCanonicalizesLocalAndStagingHistoryJSONL(t *testing.T) {
 		`{"timestamp":200,"sessionId":"s2","display":"b"}`,
 		"",
 	}, "\n")
-	os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(localContent), 0o644)
+	mustNoErr(t, os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(localContent), 0o644))
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
@@ -730,12 +742,12 @@ func TestPullAppendOnlyNeverConflicts(t *testing.T) {
 
 	// Staging has base content for the append-only file.
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte(`{"timestamp":100,"sessionId":"sA","display":"A"}`+"\n"), 0o644)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte(`{"timestamp":100,"sessionId":"sA","display":"A"}`+"\n"), 0o644))
 
 	// Local has completely different content — would be a conflict for replace mode.
-	ag := newMockAgent(t, "claude", nil)
-	os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(`{"timestamp":200,"sessionId":"sZ","display":"Z"}`+"\n"), 0o644)
+	ag := newMockAgent(t, nil)
+	mustNoErr(t, os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte(`{"timestamp":200,"sessionId":"sZ","display":"Z"}`+"\n"), 0o644))
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeSessions}}
@@ -768,12 +780,12 @@ func TestPlanAppendOnlyNeverConflicts(t *testing.T) {
 
 	// Staging has base content.
 	agentDir := filepath.Join(be.StagingDir(), "claude")
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte("line-A\n"), 0o644)
+	mustNoErr(t, os.MkdirAll(agentDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(agentDir, "history.jsonl"), []byte("line-A\n"), 0o644))
 
 	// Local has different content — would be conflict for replace mode.
-	ag := newMockAgent(t, "claude", nil)
-	os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte("line-Z\n"), 0o644)
+	ag := newMockAgent(t, nil)
+	mustNoErr(t, os.WriteFile(filepath.Join(ag.SourceDir(), "history.jsonl"), []byte("line-Z\n"), 0o644))
 
 	orch := NewOrchestrator(be, map[string]agent.Agent{"claude": ag})
 	plan, err := orch.Plan(context.Background(), map[string][]agent.SyncType{"claude": {mockTypeSessions}})
@@ -795,11 +807,11 @@ func TestPushDeleteCleansEmptyDirs(t *testing.T) {
 	// Pre-populate staging with a file in a subdirectory.
 	agentDir := filepath.Join(be.StagingDir(), "claude")
 	subDir := filepath.Join(agentDir, "commands")
-	os.MkdirAll(subDir, 0o755)
-	os.WriteFile(filepath.Join(subDir, "old-command.md"), []byte("old"), 0o644)
+	mustNoErr(t, os.MkdirAll(subDir, 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(subDir, "old-command.md"), []byte("old"), 0o644))
 
 	// Agent collects nothing — all files removed.
-	ag := newMockAgent(t, "claude", nil)
+	ag := newMockAgent(t, nil)
 
 	agents := map[string]agent.Agent{"claude": ag}
 	syncTypes := map[string][]agent.SyncType{"claude": {mockTypeClaudeMD}}

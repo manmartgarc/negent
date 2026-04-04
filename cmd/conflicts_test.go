@@ -194,4 +194,3 @@ func TestCommitConflictResolutionsCommitsWhenStagedDiffExists(t *testing.T) {
 		t.Fatalf("unexpected commit call: %v", last)
 	}
 }
-

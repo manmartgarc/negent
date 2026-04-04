@@ -33,7 +33,13 @@ type hookMatcher struct {
 
 // DefaultClaudeSettingsPath returns the path to Claude Code's settings file.
 func DefaultClaudeSettingsPath() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = os.Getenv("HOME")
+	}
+	if home == "" {
+		home = os.TempDir()
+	}
 	return filepath.Join(home, ".claude", "settings.json")
 }
 
@@ -233,7 +239,10 @@ func writeFileAtomic(path string, data []byte) error {
 		return fmt.Errorf("writing temp file: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+		removeErr := os.Remove(tmp)
+		if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return fmt.Errorf("renaming temp file: %w (cleanup failed: %v)", err, removeErr)
+		}
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
 	return nil

@@ -74,7 +74,10 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 
 		defaultMachine := cfg.Machine
 		if defaultMachine == "" {
-			defaultMachine, _ = os.Hostname()
+			hostname, hostnameErr := os.Hostname()
+			if hostnameErr == nil {
+				defaultMachine = hostname
+			}
 		}
 		if configMachineFlag != "" {
 			cfg.Machine = configMachineFlag

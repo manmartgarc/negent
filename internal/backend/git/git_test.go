@@ -24,8 +24,15 @@ type fakeRunner struct {
 }
 
 type fakeResp struct {
-	out []byte
 	err error
+	out []byte
+}
+
+func mustNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (f *fakeRunner) run(_ context.Context, dir string, args ...string) ([]byte, error) {
@@ -112,7 +119,7 @@ func TestInitConfigRemoteOverridesField(t *testing.T) {
 
 func TestInitPullsIfAlreadyCloned(t *testing.T) {
 	staging := t.TempDir()
-	os.MkdirAll(filepath.Join(staging, ".git"), 0o755)
+	mustNoErr(t, os.MkdirAll(filepath.Join(staging, ".git"), 0o755))
 
 	fr := &fakeRunner{responses: []fakeResp{
 		okResp("abc123\n"), // rev-parse HEAD
@@ -426,8 +433,8 @@ func TestFetchSendsFetchOrigin(t *testing.T) {
 func TestFetchedFilesParsesOutput(t *testing.T) {
 	fr := &fakeRunner{responses: []fakeResp{okResp("A new.txt\nM existing.txt\nD removed.txt\n")}}
 	staging := t.TempDir()
-	os.MkdirAll(filepath.Join(staging, ".git"), 0o755)
-	os.WriteFile(filepath.Join(staging, ".git", "FETCH_HEAD"), []byte("fetched"), 0o644)
+	mustNoErr(t, os.MkdirAll(filepath.Join(staging, ".git"), 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(staging, ".git", "FETCH_HEAD"), []byte("fetched"), 0o644))
 	g := &Git{stagingDir: staging, runner: fr.run}
 
 	changes, err := g.FetchedFiles(context.Background())
@@ -530,8 +537,8 @@ func TestFetchedFilesNoFetchHead(t *testing.T) {
 
 func TestFetchedFilesReturnsChangedFiles(t *testing.T) {
 	staging := t.TempDir()
-	os.MkdirAll(filepath.Join(staging, ".git"), 0o755)
-	os.WriteFile(filepath.Join(staging, ".git", "FETCH_HEAD"), []byte("abc123"), 0o644)
+	mustNoErr(t, os.MkdirAll(filepath.Join(staging, ".git"), 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(staging, ".git", "FETCH_HEAD"), []byte("abc123"), 0o644))
 
 	fr := &fakeRunner{responses: []fakeResp{okResp("M changed.txt\nA other.txt\n")}}
 	g := &Git{stagingDir: staging, runner: fr.run}
@@ -554,8 +561,8 @@ func TestFetchedFilesReturnsChangedFiles(t *testing.T) {
 
 func TestFetchedFilesEmptyWhenUpToDate(t *testing.T) {
 	staging := t.TempDir()
-	os.MkdirAll(filepath.Join(staging, ".git"), 0o755)
-	os.WriteFile(filepath.Join(staging, ".git", "FETCH_HEAD"), []byte("abc123"), 0o644)
+	mustNoErr(t, os.MkdirAll(filepath.Join(staging, ".git"), 0o755))
+	mustNoErr(t, os.WriteFile(filepath.Join(staging, ".git", "FETCH_HEAD"), []byte("abc123"), 0o644))
 
 	fr := &fakeRunner{responses: []fakeResp{okResp("")}}
 	g := &Git{stagingDir: staging, runner: fr.run}

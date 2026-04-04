@@ -17,7 +17,13 @@ const Name = "claude"
 
 // DefaultSourceDir returns the default Claude Code config directory.
 func DefaultSourceDir() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = os.Getenv("HOME")
+	}
+	if home == "" {
+		home = os.TempDir()
+	}
 	return filepath.Join(home, ".claude")
 }
 
@@ -142,16 +148,16 @@ var excludeDirs = map[string]bool{
 // to enable cross-machine matching.
 type SidecarMeta struct {
 	AbsolutePath string   `json:"absolute_path"`
-	Segments     []string `json:"segments"`
 	GitRemote    string   `json:"git_remote,omitempty"`
 	OS           string   `json:"os"`
+	Segments     []string `json:"segments"`
 	IsHome       bool     `json:"is_home,omitempty"`
 }
 
 // Claude implements agent.Agent for Claude Code.
 type Claude struct {
+	links     map[string]string
 	sourceDir string
-	links     map[string]string // remote project dir -> local absolute path (manual overrides)
 }
 
 // New creates a new Claude agent with the given source directory.
@@ -250,7 +256,10 @@ func (c *Claude) Collect(syncTypes []agent.SyncType) ([]agent.SyncFile, error) {
 				if c.isExcluded(absPath) {
 					continue
 				}
-				relPath, _ := filepath.Rel(c.sourceDir, absPath)
+				relPath, err := filepath.Rel(c.sourceDir, absPath)
+				if err != nil {
+					return nil, fmt.Errorf("computing relative path for %s: %w", absPath, err)
+				}
 				files = append(files, agent.SyncFile{
 					RelPath:     relPath,
 					StagingPath: filepath.ToSlash(relPath),
@@ -433,7 +442,10 @@ func (c *Claude) matchProject(remoteDir string, meta SidecarMeta, localProjects 
 	// Tier 4: Home directory match — if the remote project is the other
 	// machine's home dir, match it to the local home dir project.
 	if meta.IsHome || looksLikeHomeDir(meta) {
-		homeDir, _ := os.UserHomeDir()
+		homeDir, err := os.UserHomeDir()
+		if err != nil || homeDir == "" {
+			homeDir = os.Getenv("HOME")
+		}
 		if homeDir != "" {
 			for localDir, localPath := range localProjects {
 				if filepath.Clean(localPath) == filepath.Clean(homeDir) {
@@ -626,7 +638,10 @@ func (c *Claude) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backend.
 
 	// Build cross-machine project mapping so we compare against the right
 	// staging paths and don't report other machines' project dirs as deletions.
-	mapping, localProjects, _ := c.buildProjectMapping(stagingDir)
+	mapping, localProjects, err := c.buildProjectMapping(stagingDir)
+	if err != nil {
+		return nil, fmt.Errorf("building project mapping: %w", err)
+	}
 
 	localProjectDirs := make(map[string]bool)
 	for dirName := range localProjects {
@@ -670,11 +685,14 @@ func (c *Claude) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backend.
 
 	// Find staged files not present locally (deletions)
 	if _, err := os.Stat(stagingDir); err == nil {
-		filepath.WalkDir(stagingDir, func(path string, d os.DirEntry, err error) error { //nolint:errcheck
+		if err := filepath.WalkDir(stagingDir, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
 			}
-			relPath, _ := filepath.Rel(stagingDir, path)
+			relPath, err := filepath.Rel(stagingDir, path)
+			if err != nil {
+				return fmt.Errorf("computing path relative to staging: %w", err)
+			}
 			relPath = filepath.ToSlash(relPath)
 			if localPaths[relPath] {
 				return nil
@@ -704,7 +722,9 @@ func (c *Claude) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backend.
 			}
 			changes = append(changes, backend.FileChange{Path: relPath, Kind: backend.ChangeDeleted})
 			return nil
-		})
+		}); err != nil {
+			return nil, fmt.Errorf("walking staging dir: %w", err)
+		}
 	}
 
 	return changes, nil
@@ -735,7 +755,11 @@ func (c *Claude) isExcluded(path string) bool {
 
 	// Check file patterns
 	for _, pattern := range excludePatterns {
-		if matched, _ := filepath.Match(pattern, base); matched {
+		matched, err := filepath.Match(pattern, base)
+		if err != nil {
+			continue
+		}
+		if matched {
 			return true
 		}
 	}
@@ -766,7 +790,10 @@ func (c *Claude) generateSidecars() ([]agent.SyncFile, error) {
 		return nil, err
 	}
 
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		homeDir = os.Getenv("HOME")
+	}
 
 	var files []agent.SyncFile
 	for _, entry := range entries {

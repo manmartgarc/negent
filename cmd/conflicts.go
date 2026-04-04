@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -262,7 +263,12 @@ func printDiff(localPath, stagingPath string) {
 	cmd := exec.Command("diff", "-u", "--label", "local", "--label", "remote", localPath, stagingPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	_ = cmd.Run() // exit code 1 means files differ, which is expected
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			fmt.Fprintf(os.Stderr, "running diff: %v\n", err)
+		}
+	}
 }
 
 func copyFileFromTo(src, dst string) error {

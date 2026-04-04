@@ -9,6 +9,13 @@ import (
 
 const testBin = "/usr/local/bin/negent"
 
+func mustNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // readHooksMap is a test helper that parses settings.json and returns the hooks map.
 func readHooksMap(t *testing.T, path string) map[string][]hookMatcher {
 	t.Helper()
@@ -76,12 +83,15 @@ func TestInstallPreservesOtherKeys(t *testing.T) {
 		t.Fatalf("InstallClaude: %v", err)
 	}
 
-	data, _ := os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var top map[string]json.RawMessage
-	_ = json.Unmarshal(data, &top)
+	mustNoErr(t, json.Unmarshal(data, &top))
 
 	var theme string
-	_ = json.Unmarshal(top["theme"], &theme)
+	mustNoErr(t, json.Unmarshal(top["theme"], &theme))
 	if theme != "dark" {
 		t.Errorf("theme: got %q, want %q", theme, "dark")
 	}
@@ -174,7 +184,10 @@ func TestInstallInvalidJSON(t *testing.T) {
 	}
 
 	// File must be unchanged
-	got, _ := os.ReadFile(path)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(got) != string(original) {
 		t.Errorf("file was modified despite parse error")
 	}
@@ -234,9 +247,12 @@ func TestUninstallRemovesEmptyHooksKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data, _ := os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var top map[string]json.RawMessage
-	_ = json.Unmarshal(data, &top)
+	mustNoErr(t, json.Unmarshal(data, &top))
 	if _, ok := top["hooks"]; ok {
 		t.Error("\"hooks\" key still present after all hooks removed")
 	}

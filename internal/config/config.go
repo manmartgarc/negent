@@ -10,17 +10,17 @@ import (
 
 // AgentConfig holds per-agent sync configuration.
 type AgentConfig struct {
+	Links  map[string]string `mapstructure:"links,omitempty" yaml:"links,omitempty"`
 	Source string            `mapstructure:"source" yaml:"source"`
 	Sync   []string          `mapstructure:"sync" yaml:"sync"`
-	Links  map[string]string `mapstructure:"links,omitempty" yaml:"links,omitempty"` // remote project dir -> local path
 }
 
 // Config is the top-level negent configuration.
 type Config struct {
+	Agents  map[string]AgentConfig `mapstructure:"agents" yaml:"agents"`
 	Backend string                 `mapstructure:"backend" yaml:"backend"`
 	Repo    string                 `mapstructure:"repo" yaml:"repo"`
 	Machine string                 `mapstructure:"machine" yaml:"machine"`
-	Agents  map[string]AgentConfig `mapstructure:"agents" yaml:"agents"`
 }
 
 // DefaultPath returns the default config file path.
@@ -29,7 +29,14 @@ type Config struct {
 func DefaultPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		home, _ := os.UserHomeDir()
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil || home == "" {
+			if envHome := os.Getenv("HOME"); envHome != "" {
+				home = envHome
+			} else {
+				home = os.TempDir()
+			}
+		}
 		dir = filepath.Join(home, ".config")
 	}
 	return filepath.Join(dir, "negent", "config.yaml")
