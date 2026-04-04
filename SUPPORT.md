@@ -4,6 +4,8 @@
 
 For usage questions or troubleshooting, open a GitHub issue.
 
+Issue templates are available for bug reports and feature requests.
+
 Please include:
 
 - Your OS and shell
