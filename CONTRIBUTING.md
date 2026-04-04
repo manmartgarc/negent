@@ -6,7 +6,13 @@ Thanks for contributing.
 
 1. Install Go `1.23+` and Git.
 2. Clone the repository.
-3. Build and run tests:
+3. Configure repo-managed git hooks:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+4. Build and run tests:
 
 ```bash
 go build -o negent .
@@ -26,6 +32,8 @@ go test ./...
 go vet ./...
 ```
 
+The pre-commit hook updates and stages `README.md` command table entries automatically.
+
 ## Pull requests
 
 Please include:
@@ -33,6 +41,7 @@ Please include:
 - A clear summary of what changed and why
 - Any behavior or UX impact
 - Notes about migration or compatibility impact (if any)
+- Changelog updates in `CHANGELOG.md` for user-visible changes that should appear in release notes
 
 ## Scope notes
 

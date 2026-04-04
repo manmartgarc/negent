@@ -17,6 +17,11 @@ var rootCmd = &cobra.Command{
 	PersistentPreRunE: checkPlatformSupport,
 }
 
+// RootCommand exposes the root command tree for internal tooling.
+func RootCommand() *cobra.Command {
+	return rootCmd
+}
+
 // Execute runs the root command.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {

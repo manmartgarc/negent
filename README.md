@@ -1,22 +1,31 @@
 # negent
 
+[![CI](https://github.com/manmart/negent/actions/workflows/ci.yml/badge.svg)](https://github.com/manmart/negent/actions/workflows/ci.yml)
+[![Security](https://github.com/manmart/negent/actions/workflows/security.yml/badge.svg)](https://github.com/manmart/negent/actions/workflows/security.yml)
+[![Release](https://github.com/manmart/negent/actions/workflows/release.yml/badge.svg)](https://github.com/manmart/negent/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 `negent` syncs AI coding assistant config and memory files across machines using a git-backed remote store.
-
-## Current support
-
-- **Agent support:** Claude Code
-- **Platforms:** Linux and macOS (Windows is currently unsupported)
-- **Backend:** Git
 
 ## Why use it
 
 - Keep assistant setup consistent across laptop/workstation/server environments.
-- Review and version your assistant data in a standard Git workflow.
-- Preview sync behavior before applying it (`diff`, `push --dry-run`, `pull --dry-run`).
+- Review and version assistant data with standard Git workflows.
+- Preview all sync actions before applying them (`diff`, `push --dry-run`, `pull --dry-run`).
+- Resolve local/remote conflicts with interactive or non-interactive flows.
+
+## Support matrix
+
+| Area | Status |
+| --- | --- |
+| Agents | Claude Code |
+| Platforms | Linux, macOS |
+| Backend | Git |
+| Windows | Not supported yet |
 
 ## Installation
 
-### Build from source
+### Option 1: Build from source
 
 ```bash
 git clone https://github.com/manmart/negent.git
@@ -24,11 +33,15 @@ cd negent
 go build -o negent .
 ```
 
-### Install with `go install` (after public release)
+### Option 2: Go install
 
 ```bash
 go install github.com/manmart/negent@latest
 ```
+
+### Option 3: Prebuilt binaries
+
+Download artifacts from [GitHub Releases](https://github.com/manmart/negent/releases) (published for tagged versions).
 
 ## Quick start
 
@@ -46,7 +59,7 @@ negent push --dry-run
 negent push
 ```
 
-4. On machine B, run init against the same repo, then pull:
+4. On machine B, point to the same repo and pull:
 
 ```bash
 negent init --repo git@github.com:<you>/<negent-sync-repo>.git
@@ -68,26 +81,41 @@ negent conflicts --list
 negent conflicts
 ```
 
+## Command reference
+
+| Command | Purpose |
+| --- | --- |
+| `add <agent>` | Add another agent to an existing negent setup |
+| `auto` | Manage automatic sync hooks |
+| `clean <agent>` | Delete local agent configuration on this machine |
+| `completion` | Generate the autocompletion script for the specified shell |
+| `config edit` | Edit negent configuration |
+| `conflicts` | List and resolve sync conflicts |
+| `diff` | Preview local and remote sync actions |
+| `init` | Initialize negent on this machine |
+| `link <agent> <remote-project> <local-path>` | Manually link a remote project to a local path |
+| `pull` | Pull remote agent configs to this machine |
+| `push` | Push local agent configs to the remote |
+| `status` | Show sync status for configured agents |
+
 ## Configuration
 
-Default config path:
+Default path:
 
 ```text
 ~/.config/negent/config.yaml
 ```
 
-Top-level config fields:
+Top-level fields:
 
 - `backend`: currently `git`
 - `repo`: remote URL for sync storage
 - `machine`: machine label used in sync metadata
-- `agents`: per-agent source/sync settings
+- `agents`: per-agent source and sync-type settings
 
 ## Sync types and data model
 
-Claude sync-type mapping and exclusions are documented in:
-
-- [`docs/agent-sync-types.md`](docs/agent-sync-types.md)
+- Claude sync-type taxonomy and exclusions: [`docs/agent-sync-types.md`](docs/agent-sync-types.md)
 
 ## Development
 
@@ -99,13 +127,14 @@ go test -cover ./...
 go vet ./...
 ```
 
-## Project layout
+## Documentation and community
 
-- `cmd/`: Cobra CLI commands
-- `internal/agent/`: assistant-specific file collection and placement
-- `internal/backend/`: backend abstraction and Git backend
-- `internal/sync/`: orchestrator, planning, conflict detection, merge logic
-- `internal/config/`: YAML config loading/saving
+- Launch runbook: [docs/launch-runbook.md](docs/launch-runbook.md)
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Security policy: [SECURITY.md](SECURITY.md)
+- Support: [SUPPORT.md](SUPPORT.md)
+- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ## License
 
