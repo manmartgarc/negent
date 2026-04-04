@@ -97,6 +97,10 @@ negent conflicts
 | `push` | Push local agent configs to the remote |
 | `status` | Show sync status for configured agents |
 
+## Auto-sync with Claude Code hooks
+
+negent can sync automatically using Claude Code's [hook system](https://docs.anthropic.com/en/docs/claude-code/hooks). The recommended strategy is to push before pulling on session start, since Claude Code writes session and history files after the `Stop` hook completes.
+
 ## Configuration
 
 Default path:
