@@ -174,10 +174,25 @@ func (g *Git) FetchedFiles(ctx context.Context) ([]backend.FileChange, error) {
 	return changes, nil
 }
 
+// resetDirty discards any uncommitted changes in the staging directory.
+// This recovers from interrupted operations (e.g. a push that failed after
+// writing files but before committing them).
+func (g *Git) resetDirty(ctx context.Context) error {
+	if err := g.run(ctx, g.stagingDir, "checkout", "--", "."); err != nil {
+		return err
+	}
+	return g.run(ctx, g.stagingDir, "clean", "-fd")
+}
+
 func (g *Git) Pull(ctx context.Context) error {
 	// Check if there are any commits in the remote; if not, skip pull.
 	if err := g.run(ctx, g.stagingDir, "rev-parse", "HEAD"); err != nil {
 		return nil // empty repo, nothing to pull
+	}
+	// Discard uncommitted changes left by a previous failed operation so that
+	// pull --rebase can proceed on a clean working tree.
+	if err := g.resetDirty(ctx); err != nil {
+		return fmt.Errorf("resetting dirty staging: %w", err)
 	}
 	// If a previous rebase was interrupted (e.g. crash, signal), complete or
 	// abort it before attempting a new pull.

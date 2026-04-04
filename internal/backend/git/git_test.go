@@ -116,6 +116,8 @@ func TestInitPullsIfAlreadyCloned(t *testing.T) {
 
 	fr := &fakeRunner{responses: []fakeResp{
 		okResp("abc123\n"), // rev-parse HEAD
+		okResp(""),         // checkout -- .
+		okResp(""),         // clean -fd
 		okResp(""),         // pull --rebase
 	}}
 	g := &Git{remote: "git@github.com:user/repo.git", stagingDir: staging, runner: fr.run}
@@ -124,11 +126,13 @@ func TestInitPullsIfAlreadyCloned(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	if len(fr.calls) != 2 {
-		t.Fatalf("expected 2 calls, got %d: %v", len(fr.calls), fr.calls)
+	if len(fr.calls) != 4 {
+		t.Fatalf("expected 4 calls, got %d: %v", len(fr.calls), fr.calls)
 	}
 	assertCall(t, fr.calls[0], staging, "rev-parse", "HEAD")
-	assertCall(t, fr.calls[1], staging, "pull", "--rebase")
+	assertCall(t, fr.calls[1], staging, "checkout", "--", ".")
+	assertCall(t, fr.calls[2], staging, "clean", "-fd")
+	assertCall(t, fr.calls[3], staging, "pull", "--rebase")
 }
 
 func TestPushSendsCommitAndPush(t *testing.T) {
@@ -160,6 +164,8 @@ func TestPushRetriesAfterPull(t *testing.T) {
 		okResp(""),          // commit -m
 		errResp("rejected"), // push (fails — remote diverged)
 		okResp("abc123\n"),  // rev-parse HEAD (inside retry Pull)
+		okResp(""),          // checkout -- .
+		okResp(""),          // clean -fd
 		okResp(""),          // pull --rebase
 		okResp(""),          // push (retry)
 	}}
@@ -169,16 +175,18 @@ func TestPushRetriesAfterPull(t *testing.T) {
 		t.Fatalf("Push: %v", err)
 	}
 
-	if len(fr.calls) != 7 {
-		t.Fatalf("expected 7 calls, got %d: %v", len(fr.calls), fr.calls)
+	if len(fr.calls) != 9 {
+		t.Fatalf("expected 9 calls, got %d: %v", len(fr.calls), fr.calls)
 	}
 	assertCall(t, fr.calls[0], "/staging", "add", "-A")
 	assertCall(t, fr.calls[1], "/staging", "diff", "--cached", "--quiet")
 	assertCall(t, fr.calls[2], "/staging", "commit", "-m", "test commit")
 	assertCall(t, fr.calls[3], "/staging", "push")
 	assertCall(t, fr.calls[4], "/staging", "rev-parse", "HEAD")
-	assertCall(t, fr.calls[5], "/staging", "pull", "--rebase")
-	assertCall(t, fr.calls[6], "/staging", "push")
+	assertCall(t, fr.calls[5], "/staging", "checkout", "--", ".")
+	assertCall(t, fr.calls[6], "/staging", "clean", "-fd")
+	assertCall(t, fr.calls[7], "/staging", "pull", "--rebase")
+	assertCall(t, fr.calls[8], "/staging", "push")
 }
 
 func TestPushSkipsCommitWhenNothingStaged(t *testing.T) {
@@ -204,6 +212,8 @@ func TestPushSkipsCommitWhenNothingStaged(t *testing.T) {
 func TestPullSendsRebaseCommand(t *testing.T) {
 	fr := &fakeRunner{responses: []fakeResp{
 		okResp("abc123\n"), // rev-parse HEAD
+		okResp(""),         // checkout -- .
+		okResp(""),         // clean -fd
 		okResp(""),         // pull --rebase
 	}}
 	g := &Git{stagingDir: "/staging", runner: fr.run}
@@ -212,11 +222,13 @@ func TestPullSendsRebaseCommand(t *testing.T) {
 		t.Fatalf("Pull: %v", err)
 	}
 
-	if len(fr.calls) != 2 {
-		t.Fatalf("expected 2 calls, got %d", len(fr.calls))
+	if len(fr.calls) != 4 {
+		t.Fatalf("expected 4 calls, got %d", len(fr.calls))
 	}
 	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
-	assertCall(t, fr.calls[1], "/staging", "pull", "--rebase")
+	assertCall(t, fr.calls[1], "/staging", "checkout", "--", ".")
+	assertCall(t, fr.calls[2], "/staging", "clean", "-fd")
+	assertCall(t, fr.calls[3], "/staging", "pull", "--rebase")
 }
 
 func TestPullSkipsEmptyRepo(t *testing.T) {
@@ -243,6 +255,8 @@ func TestPullContinuesInterruptedRebase(t *testing.T) {
 
 	fr := &fakeRunner{responses: []fakeResp{
 		okResp("abc123\n"), // rev-parse HEAD
+		okResp(""),         // checkout -- .
+		okResp(""),         // clean -fd
 		okResp(""),         // rebase --continue
 		okResp(""),         // pull --rebase
 	}}
@@ -252,12 +266,14 @@ func TestPullContinuesInterruptedRebase(t *testing.T) {
 		t.Fatalf("Pull: %v", err)
 	}
 
-	if len(fr.calls) != 3 {
-		t.Fatalf("expected 3 calls, got %d: %v", len(fr.calls), fr.calls)
+	if len(fr.calls) != 5 {
+		t.Fatalf("expected 5 calls, got %d: %v", len(fr.calls), fr.calls)
 	}
 	assertCall(t, fr.calls[0], staging, "rev-parse", "HEAD")
-	assertCall(t, fr.calls[1], staging, "rebase", "--continue")
-	assertCall(t, fr.calls[2], staging, "pull", "--rebase")
+	assertCall(t, fr.calls[1], staging, "checkout", "--", ".")
+	assertCall(t, fr.calls[2], staging, "clean", "-fd")
+	assertCall(t, fr.calls[3], staging, "rebase", "--continue")
+	assertCall(t, fr.calls[4], staging, "pull", "--rebase")
 }
 
 func TestPullAbortsInterruptedRebaseWhenContinueFails(t *testing.T) {
@@ -268,6 +284,8 @@ func TestPullAbortsInterruptedRebaseWhenContinueFails(t *testing.T) {
 
 	fr := &fakeRunner{responses: []fakeResp{
 		okResp("abc123\n"),  // rev-parse HEAD
+		okResp(""),          // checkout -- .
+		okResp(""),          // clean -fd
 		errResp("continue"), // rebase --continue
 		okResp(""),          // rebase --abort
 		okResp(""),          // pull --rebase
@@ -278,18 +296,22 @@ func TestPullAbortsInterruptedRebaseWhenContinueFails(t *testing.T) {
 		t.Fatalf("Pull: %v", err)
 	}
 
-	if len(fr.calls) != 4 {
-		t.Fatalf("expected 4 calls, got %d: %v", len(fr.calls), fr.calls)
+	if len(fr.calls) != 6 {
+		t.Fatalf("expected 6 calls, got %d: %v", len(fr.calls), fr.calls)
 	}
 	assertCall(t, fr.calls[0], staging, "rev-parse", "HEAD")
-	assertCall(t, fr.calls[1], staging, "rebase", "--continue")
-	assertCall(t, fr.calls[2], staging, "rebase", "--abort")
-	assertCall(t, fr.calls[3], staging, "pull", "--rebase")
+	assertCall(t, fr.calls[1], staging, "checkout", "--", ".")
+	assertCall(t, fr.calls[2], staging, "clean", "-fd")
+	assertCall(t, fr.calls[3], staging, "rebase", "--continue")
+	assertCall(t, fr.calls[4], staging, "rebase", "--abort")
+	assertCall(t, fr.calls[5], staging, "pull", "--rebase")
 }
 
 func TestPullAbortsWhenRebasePullFails(t *testing.T) {
 	fr := &fakeRunner{responses: []fakeResp{
 		okResp("abc123\n"),        // rev-parse HEAD
+		okResp(""),                // checkout -- .
+		okResp(""),                // clean -fd
 		errResp("merge conflict"), // pull --rebase
 		okResp(""),                // diff --name-only --diff-filter=U
 		okResp(""),                // rebase --abort
@@ -305,18 +327,22 @@ func TestPullAbortsWhenRebasePullFails(t *testing.T) {
 		t.Fatalf("expected ConflictError, got %T: %v", err, err)
 	}
 
-	if len(fr.calls) != 4 {
-		t.Fatalf("expected 4 calls, got %d: %v", len(fr.calls), fr.calls)
+	if len(fr.calls) != 6 {
+		t.Fatalf("expected 6 calls, got %d: %v", len(fr.calls), fr.calls)
 	}
 	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
-	assertCall(t, fr.calls[1], "/staging", "pull", "--rebase")
-	assertCall(t, fr.calls[2], "/staging", "diff", "--name-only", "--diff-filter=U")
-	assertCall(t, fr.calls[3], "/staging", "rebase", "--abort")
+	assertCall(t, fr.calls[1], "/staging", "checkout", "--", ".")
+	assertCall(t, fr.calls[2], "/staging", "clean", "-fd")
+	assertCall(t, fr.calls[3], "/staging", "pull", "--rebase")
+	assertCall(t, fr.calls[4], "/staging", "diff", "--name-only", "--diff-filter=U")
+	assertCall(t, fr.calls[5], "/staging", "rebase", "--abort")
 }
 
 func TestPullReturnsConflictErrorWhenUnmergedFilesDetected(t *testing.T) {
 	fr := &fakeRunner{responses: []fakeResp{
 		okResp("abc123\n"),                    // rev-parse HEAD
+		okResp(""),                            // checkout -- .
+		okResp(""),                            // clean -fd
 		errResp("rebase failed"),              // pull --rebase
 		okResp("claude/skills/a.md\nb.txt\n"), // diff --name-only --diff-filter=U
 		okResp(""),                            // rebase --abort
@@ -339,6 +365,8 @@ func TestPullReturnsConflictErrorWhenUnmergedFilesDetected(t *testing.T) {
 func TestPullReturnsGenericErrorWhenNoConflictDetected(t *testing.T) {
 	fr := &fakeRunner{responses: []fakeResp{
 		okResp("abc123\n"),     // rev-parse HEAD
+		okResp(""),             // checkout -- .
+		okResp(""),             // clean -fd
 		errResp("auth failed"), // pull --rebase
 		okResp(""),             // diff --name-only --diff-filter=U
 		okResp(""),             // rebase --abort
@@ -353,6 +381,28 @@ func TestPullReturnsGenericErrorWhenNoConflictDetected(t *testing.T) {
 	if errors.As(err, &conflictErr) {
 		t.Fatalf("did not expect ConflictError for auth failure, got: %v", err)
 	}
+}
+
+func TestPullResetsDirtyStagingBeforeRebase(t *testing.T) {
+	fr := &fakeRunner{responses: []fakeResp{
+		okResp("abc123\n"), // rev-parse HEAD
+		okResp(""),         // checkout -- .
+		okResp(""),         // clean -fd
+		okResp(""),         // pull --rebase
+	}}
+	g := &Git{stagingDir: "/staging", runner: fr.run}
+
+	if err := g.Pull(context.Background()); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+
+	if len(fr.calls) != 4 {
+		t.Fatalf("expected 4 calls, got %d: %v", len(fr.calls), fr.calls)
+	}
+	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
+	assertCall(t, fr.calls[1], "/staging", "checkout", "--", ".")
+	assertCall(t, fr.calls[2], "/staging", "clean", "-fd")
+	assertCall(t, fr.calls[3], "/staging", "pull", "--rebase")
 }
 
 func TestFetchSendsFetchOrigin(t *testing.T) {
