@@ -1,0 +1,30 @@
+name: Stale Issue and PR Cleanup
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark stale items
+        uses: actions/stale@v9
+        with:
+          days-before-stale: 45
+          days-before-close: 14
+          stale-issue-message: >
+            This issue has been automatically marked as stale due to inactivity.
+            It will be closed if no further activity occurs.
+          stale-pr-message: >
+            This pull request has been automatically marked as stale due to inactivity.
+            It will be closed if no further activity occurs.
+          close-issue-message: >
+            Closing as stale. Please reopen if this is still relevant.
+          close-pr-message: >
+            Closing as stale. Please reopen if you want to continue this work.
