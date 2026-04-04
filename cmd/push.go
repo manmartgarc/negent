@@ -115,6 +115,6 @@ func newAgent(name, sourceDir string, links map[string]string) (agent.Agent, err
 	case "claude":
 		return agentclaude.New(expanded, links), nil
 	default:
-		return nil, fmt.Errorf("unsupported agent: %s", name)
+		return nil, fmt.Errorf("agent %q is not yet supported — remove it from your config or use 'negent config edit'", name)
 	}
 }

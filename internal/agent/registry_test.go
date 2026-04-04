@@ -23,10 +23,8 @@ func TestKnownAgents(t *testing.T) {
 		names[a.Name] = true
 	}
 
-	for _, expected := range []string{"claude", "codex", "copilot", "kiro"} {
-		if !names[expected] {
-			t.Errorf("missing known agent %q", expected)
-		}
+	if !names["claude"] {
+		t.Error("missing known agent \"claude\"")
 	}
 }
 

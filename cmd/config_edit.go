@@ -87,18 +87,6 @@ func runConfigEdit(cmd *cobra.Command, args []string) error {
 
 		selectedAgents := defaultSelectedAgents(cfg.Agents, agent.DetectAgents())
 		known := agent.KnownAgents()
-		for _, name := range sortedAgentNames(cfg.Agents) {
-			found := false
-			for _, a := range known {
-				if a.Name == name {
-					found = true
-					break
-				}
-			}
-			if !found {
-				known = append(known, agent.KnownAgent{Name: name, SourceDir: cfg.Agents[name].Source})
-			}
-		}
 		selectedAgents, err = selectAgentsInteractive(known, selectedAgents)
 		if err != nil {
 			return err

@@ -12,12 +12,11 @@ type KnownAgent struct {
 }
 
 // KnownAgents returns the list of agents negent has built-in support for.
+// Only agents with a working implementation belong here; add new entries
+// when their Agent implementation lands.
 func KnownAgents() []KnownAgent {
 	return []KnownAgent{
 		{Name: "claude", SourceDir: "~/.claude"},
-		{Name: "codex", SourceDir: "~/.codex"},
-		{Name: "copilot", SourceDir: "~/.copilot"},
-		{Name: "kiro", SourceDir: "~/.kiro"},
 	}
 }
 
