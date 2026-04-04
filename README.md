@@ -1,8 +1,7 @@
 # negent
 
 [![CI](https://github.com/manmartgarc/negent/actions/workflows/ci.yml/badge.svg)](https://github.com/manmartgarc/negent/actions/workflows/ci.yml)
-[![Security](https://github.com/manmart/negent/actions/workflows/security.yml/badge.svg)](https://github.com/manmart/negent/actions/workflows/security.yml)
-[![Release](https://github.com/manmart/negent/actions/workflows/release.yml/badge.svg)](https://github.com/manmart/negent/actions/workflows/release.yml)
+[![Release](https://github.com/manmartgarc/negent/actions/workflows/release.yml/badge.svg)](https://github.com/manmartgarc/negent/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 `negent` syncs AI coding assistant config and memory files across machines using a git-backed remote store.
