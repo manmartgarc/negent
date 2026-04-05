@@ -17,6 +17,7 @@ type KnownAgent struct {
 func KnownAgents() []KnownAgent {
 	return []KnownAgent{
 		{Name: "claude", SourceDir: "~/.claude"},
+		{Name: "copilot", SourceDir: defaultCopilotSourceDir()},
 	}
 }
 
@@ -43,4 +44,11 @@ func ExpandHome(path string) string {
 		return path
 	}
 	return filepath.Join(home, path[2:])
+}
+
+func defaultCopilotSourceDir() string {
+	if envDir := os.Getenv("COPILOT_HOME"); envDir != "" {
+		return envDir
+	}
+	return "~/.copilot"
 }

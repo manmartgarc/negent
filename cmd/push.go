@@ -8,6 +8,7 @@ import (
 
 	"github.com/manmart/negent/internal/agent"
 	agentclaude "github.com/manmart/negent/internal/agent/claude"
+	agentcopilot "github.com/manmart/negent/internal/agent/copilot"
 	"github.com/manmart/negent/internal/backend"
 	gitbackend "github.com/manmart/negent/internal/backend/git"
 	"github.com/manmart/negent/internal/config"
@@ -114,6 +115,8 @@ func newAgent(name, sourceDir string, links map[string]string) (agent.Agent, err
 	switch name {
 	case "claude":
 		return agentclaude.New(expanded, links), nil
+	case "copilot":
+		return agentcopilot.New(expanded), nil
 	default:
 		return nil, fmt.Errorf("agent %q is not yet supported — remove it from your config or use 'negent config edit'", name)
 	}

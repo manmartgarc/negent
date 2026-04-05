@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/manmart/negent/internal/agent/claude"
+	"github.com/manmart/negent/internal/agent/copilot"
 	"github.com/manmart/negent/internal/config"
 )
 
@@ -54,5 +55,43 @@ func TestDefaultSyncTypeStrings(t *testing.T) {
 	}
 	if got[0] != string(claude.SyncTypeClaudeMD) {
 		t.Fatalf("defaultSyncTypeStrings()[0] = %q, want %q", got[0], claude.SyncTypeClaudeMD)
+	}
+}
+
+func TestBuildAgentsConstructsCopilot(t *testing.T) {
+	cfg := &config.Config{
+		Agents: map[string]config.AgentConfig{
+			"copilot": {
+				Source: "~/.copilot",
+				Sync:   []string{"config", "mcp", "agents", "skills", "hooks"},
+			},
+		},
+	}
+
+	agents, syncTypes, err := buildAgents(cfg)
+	if err != nil {
+		t.Fatalf("buildAgents() returned error: %v", err)
+	}
+
+	if agents["copilot"].Name() != "copilot" {
+		t.Fatalf("buildAgents() created agent %q, want copilot", agents["copilot"].Name())
+	}
+
+	want := []string{
+		string(copilot.SyncTypeConfig),
+		string(copilot.SyncTypeMCP),
+		string(copilot.SyncTypeAgents),
+		string(copilot.SyncTypeSkills),
+		string(copilot.SyncTypeHooks),
+	}
+
+	got := syncTypes["copilot"]
+	if len(got) != len(want) {
+		t.Fatalf("buildAgents() returned %d sync types, want %d", len(got), len(want))
+	}
+	for i, syncType := range got {
+		if string(syncType) != want[i] {
+			t.Fatalf("syncTypes[%d] = %q, want %q", i, syncType, want[i])
+		}
 	}
 }

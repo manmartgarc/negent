@@ -25,7 +25,7 @@
 
 | Area | Status |
 | --- | --- |
-| Agents | Claude Code |
+| Agents | Claude Code, GitHub Copilot CLI |
 | Platforms | Linux, macOS |
 | Backend | Git |
 | Windows | Not supported yet |
@@ -171,6 +171,7 @@ Top-level fields:
 ## Sync types and data model
 
 - Claude sync-type taxonomy and exclusions: [`docs/agent-sync-types.md`](docs/agent-sync-types.md)
+- GitHub Copilot CLI sync-type taxonomy and exclusions: [`docs/agent-sync-types.md`](docs/agent-sync-types.md)
 
 ## Development
 

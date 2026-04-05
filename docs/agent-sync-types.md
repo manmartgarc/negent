@@ -50,3 +50,32 @@ Legacy Claude config aliases still accepted on read:
 - `sessions` -> `sessions`
 - `history` -> `history`
 - `plugins` -> `plugins`
+
+## GitHub Copilot CLI
+
+Upstream reference: <https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference>
+
+Negent syncs these Copilot-specific type IDs:
+
+- `config`: `config.json`
+- `mcp`: `mcp-config.json`
+- `agents`: `agents/`
+- `skills`: `skills/`
+- `hooks`: `hooks/`
+
+Default Copilot sync types:
+
+- `config`
+- `mcp`
+- `agents`
+- `skills`
+- `hooks`
+
+Negent intentionally does not sync these Copilot files in this phase:
+
+- `permissions-config.json`
+- `session-state/`
+- `session-store.db`
+- `logs/`
+- `installed-plugins/`
+- `ide/`

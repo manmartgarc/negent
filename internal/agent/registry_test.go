@@ -26,6 +26,9 @@ func TestKnownAgents(t *testing.T) {
 	if !names["claude"] {
 		t.Error("missing known agent \"claude\"")
 	}
+	if !names["copilot"] {
+		t.Error("missing known agent \"copilot\"")
+	}
 }
 
 func TestDetectAgents(t *testing.T) {
