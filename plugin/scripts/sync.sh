@@ -82,4 +82,6 @@ NEGENT=$(find_negent) || {
   NEGENT="${INSTALL_DIR}/negent"
 }
 
-exec "$NEGENT" "$@"
+# Run negent — convert any non-zero exit to code 2 so Claude Code
+# surfaces the error (exit 1 is treated as non-blocking / silent).
+"$NEGENT" "$@" || exit 2
