@@ -74,10 +74,4 @@ NEGENT=$(find_negent) || {
   NEGENT="${INSTALL_DIR}/negent"
 }
 
-# Run negent; on failure, forward stderr and exit 2 so the user
-# (and Claude on applicable events) sees the error.
-if ! output=$("$NEGENT" "$@" 2>&1); then
-  echo "$output" >&2
-  exit 2
-fi
-echo "$output"
+exec "$NEGENT" "$@"
