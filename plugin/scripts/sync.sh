@@ -77,7 +77,7 @@ NEGENT=$(find_negent) || {
   auto_install || {
     echo "negent: binary not found and auto-install failed" >&2
     echo "negent: install manually via 'go install github.com/manmartgarc/negent@latest' or download from https://github.com/${REPO}/releases" >&2
-    exit 0  # exit 0 so hook doesn't block the session
+    exit 2  # exit 2 so Claude Code surfaces the error
   }
   NEGENT="${INSTALL_DIR}/negent"
 }
