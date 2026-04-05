@@ -13,14 +13,6 @@ find_negent() {
     return
   fi
 
-  # npm global install
-  local npm_bin
-  npm_bin="$(npm root -g 2>/dev/null)/negent/bin/negent" || true
-  if [ -x "$npm_bin" ]; then
-    echo "$npm_bin"
-    return
-  fi
-
   # go install / local build
   local go_bin="${GOPATH:-$HOME/go}/bin/negent"
   if [ -x "$go_bin" ]; then
@@ -75,13 +67,13 @@ auto_install() {
 
 NEGENT=$(find_negent) || {
   auto_install || {
-    echo "negent: binary not found and auto-install failed" >&2
-    echo "negent: install manually via 'go install github.com/manmartgarc/negent@latest' or download from https://github.com/${REPO}/releases" >&2
-    exit 2  # exit 2 so Claude Code surfaces the error
+    echo "negent: binary not found and auto-install failed"
+    echo "negent: install manually via 'go install github.com/manmartgarc/negent@latest' or download from https://github.com/${REPO}/releases"
+    exit 0  # exit 0 so stdout is added as context on SessionStart
   }
   NEGENT="${INSTALL_DIR}/negent"
 }
 
-# Run negent — convert any non-zero exit to code 2 so Claude Code
-# surfaces the error (exit 1 is treated as non-blocking / silent).
-"$NEGENT" "$@" || exit 2
+# Run negent; on failure, echo the error to stdout and exit 0 so
+# Claude Code adds it as context on SessionStart.
+"$NEGENT" "$@" 2>&1 || true
