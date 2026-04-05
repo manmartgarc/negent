@@ -1,5 +1,4 @@
 {
-  "description": "Auto-sync on session start and stop",
   "hooks": {
     "SessionStart": [
       {
