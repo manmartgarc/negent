@@ -67,13 +67,17 @@ auto_install() {
 
 NEGENT=$(find_negent) || {
   auto_install || {
-    echo "negent: binary not found and auto-install failed"
-    echo "negent: install manually via 'go install github.com/manmartgarc/negent@latest' or download from https://github.com/${REPO}/releases"
-    exit 0  # exit 0 so stdout is added as context on SessionStart
+    echo "negent: binary not found and auto-install failed" >&2
+    echo "negent: install manually via 'go install github.com/manmartgarc/negent@latest' or download from https://github.com/${REPO}/releases" >&2
+    exit 2  # exit 2 so stderr is shown to the user
   }
   NEGENT="${INSTALL_DIR}/negent"
 }
 
-# Run negent; on failure, echo the error to stdout and exit 0 so
-# Claude Code adds it as context on SessionStart.
-"$NEGENT" "$@" 2>&1 || true
+# Run negent; on failure, forward stderr and exit 2 so the user
+# (and Claude on applicable events) sees the error.
+if ! output=$("$NEGENT" "$@" 2>&1); then
+  echo "$output" >&2
+  exit 2
+fi
+echo "$output"
