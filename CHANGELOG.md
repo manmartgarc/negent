@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/manmartgarc/negent/compare/v0.3.0...v0.3.1) (2026-04-05)
+
+
+### Bug Fixes
+
+* **git:** auto-resolve rebase conflicts by preferring remote content ([9dbc8ae](https://github.com/manmartgarc/negent/commit/9dbc8ae3cbb3281ed6bd42b0970e12036a7c4858))
+
 ## [0.3.0](https://github.com/manmartgarc/negent/compare/v0.2.7...v0.3.0) (2026-04-05)
 
 
