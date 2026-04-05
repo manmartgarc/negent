@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.2](https://github.com/manmartgarc/negent/compare/v0.3.1...v0.3.2) (2026-04-05)
+
+
+### Features
+
+* **agent:** add GitHub Copilot CLI support ([b41891d](https://github.com/manmartgarc/negent/commit/b41891dafedb86e3731587617767e6d97297b767))
+
+
+### Bug Fixes
+
+* **agent:** skip symlinks during file collection ([c2e2f5e](https://github.com/manmartgarc/negent/commit/c2e2f5e0145452e1a680eaeb28c02bbdc9e64b84))
+
 ## [0.3.1](https://github.com/manmartgarc/negent/compare/v0.3.0...v0.3.1) (2026-04-05)
 
 
