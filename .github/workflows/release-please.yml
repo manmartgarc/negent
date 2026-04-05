@@ -12,7 +12,49 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-publish:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build release archives
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.release-please.outputs.tag_name }}"
+          mkdir -p dist
+
+          for TARGET in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            GOOS="${TARGET%/*}"
+            GOARCH="${TARGET#*/}"
+            OUT="negent-${VERSION}-${GOOS}-${GOARCH}"
+
+            GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o negent .
+            tar -czf "dist/${OUT}.tar.gz" negent LICENSE README.md
+          done
+
+          sha256sum dist/*.tar.gz > dist/checksums.txt
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" dist/*.tar.gz dist/checksums.txt
