@@ -1,0 +1,13 @@
+{
+  "name": "negent",
+  "owner": {
+    "name": "Manuel Martinez"
+  },
+  "plugins": [
+    {
+      "name": "negent",
+      "description": "Sync AI assistant dotfiles across machines via git",
+      "source": "./plugin"
+    }
+  ]
+}

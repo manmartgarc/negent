@@ -24,13 +24,13 @@
 
 ## Installation
 
-### Option 1: Build from source
+### Option 1: npm (recommended)
 
 ```bash
-git clone https://github.com/manmart/negent.git
-cd negent
-go build -o negent .
+npm install -g negent
 ```
+
+This downloads the prebuilt binary for your platform and includes the Claude Code plugin.
 
 ### Option 2: Go install
 
@@ -41,6 +41,14 @@ go install github.com/manmart/negent@latest
 ### Option 3: Prebuilt binaries
 
 Download artifacts from [GitHub Releases](https://github.com/manmart/negent/releases) (published for tagged versions).
+
+### Option 4: Build from source
+
+```bash
+git clone https://github.com/manmart/negent.git
+cd negent
+go build -o negent .
+```
 
 ## Quick start
 
@@ -97,9 +105,49 @@ negent conflicts
 | `push` | Push local agent configs to the remote |
 | `status` | Show sync status for configured agents |
 
-## Auto-sync with Claude Code hooks
+## Claude Code plugin
 
-negent can sync automatically using Claude Code's [hook system](https://docs.anthropic.com/en/docs/claude-code/hooks). The recommended strategy is to push before pulling on session start, since Claude Code writes session and history files after the `Stop` hook completes.
+negent ships as a Claude Code [plugin](https://code.claude.com/docs/en/plugins) with slash commands and auto-sync hooks.
+
+### Install the plugin
+
+**Option A: Marketplace** (recommended)
+
+```shell
+/plugin marketplace add manmart/negent
+/plugin install negent@negent
+```
+
+**Option B: npm plugin directory**
+
+```bash
+npm install -g negent
+claude --plugin-dir $(npm root -g)/negent/plugin
+```
+
+**Option C: Local development**
+
+```bash
+claude --plugin-dir ./plugin
+```
+
+### Slash commands
+
+| Command | Description |
+| --- | --- |
+| `/negent:push` | Push local configs to remote |
+| `/negent:pull` | Pull remote configs to this machine |
+| `/negent:status` | Show sync status |
+| `/negent:diff` | Preview sync differences |
+| `/negent:conflicts` | List and resolve conflicts |
+
+### Auto-sync hooks
+
+The plugin automatically syncs on session start (push then pull) and session stop (push).
+
+### Legacy: settings.json hooks
+
+Alternatively, `negent auto enable` installs hooks directly into `~/.claude/settings.json`. The plugin approach above is preferred.
 
 ## Configuration
 

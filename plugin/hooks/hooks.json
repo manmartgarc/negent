@@ -1,0 +1,26 @@
+{
+  "description": "Auto-sync on session start and stop",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/sync.sh push && ${CLAUDE_PLUGIN_ROOT}/scripts/sync.sh pull",
+            "statusMessage": "Syncing negent..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/sync.sh push --quiet"
+          }
+        ]
+      }
+    ]
+  }
+}
