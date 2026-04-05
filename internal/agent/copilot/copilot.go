@@ -167,14 +167,25 @@ func (c *Copilot) Collect(syncTypes []agent.SyncType) ([]agent.SyncFile, error) 
 
 func (c *Copilot) walkDir(dir string) ([]string, error) {
 	root := filepath.Join(c.sourceDir, dir)
-	if _, err := os.Stat(root); os.IsNotExist(err) {
+	// Use Lstat to detect symlinks without following them.
+	info, err := os.Lstat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
 		return nil, nil
 	}
 
 	var files []string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
 		}
 		if d.IsDir() {
 			relPath, relErr := filepath.Rel(c.sourceDir, path)
@@ -200,8 +211,8 @@ func (c *Copilot) globFiles(pattern string) ([]string, error) {
 
 	var files []string
 	for _, match := range matches {
-		info, err := os.Stat(match)
-		if err != nil || info.IsDir() {
+		info, err := os.Lstat(match)
+		if err != nil || info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
 		files = append(files, match)

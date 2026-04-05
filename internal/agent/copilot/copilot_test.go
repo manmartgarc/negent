@@ -262,3 +262,47 @@ func TestDiffReportsReplaceModeChanges(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectSkipsSymlinkedDirectories(t *testing.T) {
+	dir := t.TempDir()
+	target := t.TempDir()
+
+	writeFile(t, filepath.Join(target, "SKILL.md"), "# symlinked skill")
+	mustNoErr(t, os.Symlink(target, filepath.Join(dir, "skills")))
+	writeFile(t, filepath.Join(dir, "config.json"), `{}`)
+
+	c := New(dir)
+	files, err := c.Collect([]agent.SyncType{SyncTypeSkills, SyncTypeConfig})
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+
+	for _, f := range files {
+		if f.Type == SyncTypeSkills {
+			t.Fatalf("Collect() should skip symlinked skills dir, got %q", f.RelPath)
+		}
+	}
+}
+
+func TestCollectSkipsSymlinkedFiles(t *testing.T) {
+	dir := t.TempDir()
+	target := t.TempDir()
+
+	writeFile(t, filepath.Join(target, "real.json"), `{"real":true}`)
+	mustNoErr(t, os.Symlink(
+		filepath.Join(target, "real.json"),
+		filepath.Join(dir, "config.json"),
+	))
+
+	c := New(dir)
+	files, err := c.Collect([]agent.SyncType{SyncTypeConfig})
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+
+	for _, f := range files {
+		if f.RelPath == "config.json" {
+			t.Fatalf("Collect() should skip symlinked file config.json")
+		}
+	}
+}

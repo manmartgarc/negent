@@ -890,3 +890,47 @@ func TestDiffAppendOnlyStagedOnlyIsNotDeletion(t *testing.T) {
 		t.Fatalf("expected no changes, got %v", changes)
 	}
 }
+
+func TestCollectSkipsSymlinkedDirectories(t *testing.T) {
+	dir := t.TempDir()
+	target := t.TempDir()
+
+	writeFile(t, filepath.Join(target, "my-skill", "SKILL.md"), "# symlinked")
+	mustNoErr(t, os.Symlink(target, filepath.Join(dir, "skills")))
+	writeFile(t, filepath.Join(dir, "CLAUDE.md"), "# real")
+
+	c := New(dir)
+	files, err := c.Collect([]agent.SyncType{SyncTypeSkills, SyncTypeClaudeMD})
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+
+	for _, f := range files {
+		if f.Type == SyncTypeSkills {
+			t.Fatalf("Collect() should skip symlinked skills dir, got %q", f.RelPath)
+		}
+	}
+}
+
+func TestCollectSkipsSymlinkedFiles(t *testing.T) {
+	dir := t.TempDir()
+	target := t.TempDir()
+
+	writeFile(t, filepath.Join(target, "real.md"), "# real")
+	mustNoErr(t, os.Symlink(
+		filepath.Join(target, "real.md"),
+		filepath.Join(dir, "CLAUDE.md"),
+	))
+
+	c := New(dir)
+	files, err := c.Collect([]agent.SyncType{SyncTypeClaudeMD})
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+
+	for _, f := range files {
+		if f.RelPath == "CLAUDE.md" {
+			t.Fatalf("Collect() should skip symlinked file CLAUDE.md")
+		}
+	}
+}

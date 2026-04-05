@@ -284,14 +284,25 @@ func (c *Claude) Collect(syncTypes []agent.SyncType) ([]agent.SyncFile, error) {
 // walkDir recursively collects all files under a directory.
 func (c *Claude) walkDir(dir string) ([]string, error) {
 	root := filepath.Join(c.sourceDir, dir)
-	if _, err := os.Stat(root); os.IsNotExist(err) {
+	// Use Lstat to detect symlinks without following them.
+	info, err := os.Lstat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
 		return nil, nil
 	}
 
 	var files []string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
 		}
 		if !d.IsDir() {
 			files = append(files, path)
@@ -307,11 +318,11 @@ func (c *Claude) globFiles(pattern string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("globbing %q: %w", pattern, err)
 	}
-	// Filter out directories
+	// Filter out directories and symlinks.
 	var files []string
 	for _, m := range matches {
-		info, err := os.Stat(m)
-		if err != nil || info.IsDir() {
+		info, err := os.Lstat(m)
+		if err != nil || info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
 		files = append(files, m)
