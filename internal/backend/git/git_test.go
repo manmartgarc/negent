@@ -139,7 +139,7 @@ func TestInitPullsIfAlreadyCloned(t *testing.T) {
 	assertCall(t, fr.calls[0], staging, "rev-parse", "HEAD")
 	assertCall(t, fr.calls[1], staging, "checkout", "--", ".")
 	assertCall(t, fr.calls[2], staging, "clean", "-fd")
-	assertCall(t, fr.calls[3], staging, "pull", "--rebase")
+	assertCall(t, fr.calls[3], staging, "pull", "--rebase", "-X", "ours")
 }
 
 func TestPushSendsCommitAndPush(t *testing.T) {
@@ -192,7 +192,7 @@ func TestPushRetriesAfterPull(t *testing.T) {
 	assertCall(t, fr.calls[4], "/staging", "rev-parse", "HEAD")
 	assertCall(t, fr.calls[5], "/staging", "checkout", "--", ".")
 	assertCall(t, fr.calls[6], "/staging", "clean", "-fd")
-	assertCall(t, fr.calls[7], "/staging", "pull", "--rebase")
+	assertCall(t, fr.calls[7], "/staging", "pull", "--rebase", "-X", "ours")
 	assertCall(t, fr.calls[8], "/staging", "push")
 }
 
@@ -235,7 +235,7 @@ func TestPullSendsRebaseCommand(t *testing.T) {
 	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
 	assertCall(t, fr.calls[1], "/staging", "checkout", "--", ".")
 	assertCall(t, fr.calls[2], "/staging", "clean", "-fd")
-	assertCall(t, fr.calls[3], "/staging", "pull", "--rebase")
+	assertCall(t, fr.calls[3], "/staging", "pull", "--rebase", "-X", "ours")
 }
 
 func TestPullSkipsEmptyRepo(t *testing.T) {
@@ -280,7 +280,7 @@ func TestPullContinuesInterruptedRebase(t *testing.T) {
 	assertCall(t, fr.calls[1], staging, "checkout", "--", ".")
 	assertCall(t, fr.calls[2], staging, "clean", "-fd")
 	assertCall(t, fr.calls[3], staging, "rebase", "--continue")
-	assertCall(t, fr.calls[4], staging, "pull", "--rebase")
+	assertCall(t, fr.calls[4], staging, "pull", "--rebase", "-X", "ours")
 }
 
 func TestPullAbortsInterruptedRebaseWhenContinueFails(t *testing.T) {
@@ -311,7 +311,7 @@ func TestPullAbortsInterruptedRebaseWhenContinueFails(t *testing.T) {
 	assertCall(t, fr.calls[2], staging, "clean", "-fd")
 	assertCall(t, fr.calls[3], staging, "rebase", "--continue")
 	assertCall(t, fr.calls[4], staging, "rebase", "--abort")
-	assertCall(t, fr.calls[5], staging, "pull", "--rebase")
+	assertCall(t, fr.calls[5], staging, "pull", "--rebase", "-X", "ours")
 }
 
 func TestPullAbortsWhenRebasePullFails(t *testing.T) {
@@ -340,7 +340,7 @@ func TestPullAbortsWhenRebasePullFails(t *testing.T) {
 	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
 	assertCall(t, fr.calls[1], "/staging", "checkout", "--", ".")
 	assertCall(t, fr.calls[2], "/staging", "clean", "-fd")
-	assertCall(t, fr.calls[3], "/staging", "pull", "--rebase")
+	assertCall(t, fr.calls[3], "/staging", "pull", "--rebase", "-X", "ours")
 	assertCall(t, fr.calls[4], "/staging", "diff", "--name-only", "--diff-filter=U")
 	assertCall(t, fr.calls[5], "/staging", "rebase", "--abort")
 }
@@ -409,7 +409,7 @@ func TestPullResetsDirtyStagingBeforeRebase(t *testing.T) {
 	assertCall(t, fr.calls[0], "/staging", "rev-parse", "HEAD")
 	assertCall(t, fr.calls[1], "/staging", "checkout", "--", ".")
 	assertCall(t, fr.calls[2], "/staging", "clean", "-fd")
-	assertCall(t, fr.calls[3], "/staging", "pull", "--rebase")
+	assertCall(t, fr.calls[3], "/staging", "pull", "--rebase", "-X", "ours")
 }
 
 func TestFetchSendsFetchOrigin(t *testing.T) {

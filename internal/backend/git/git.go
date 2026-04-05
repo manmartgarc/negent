@@ -214,8 +214,10 @@ func (g *Git) Pull(ctx context.Context) error {
 			}
 		}
 	}
-	// Keep linear history and rely on git's default conflict behavior.
-	out, err := g.runner(ctx, g.stagingDir, "pull", "--rebase")
+	// Keep linear history; auto-resolve content conflicts by preferring
+	// remote (in rebase, "ours" = upstream = remote). The orchestrator's
+	// base-snapshot comparison is the authoritative conflict checker.
+	out, err := g.runner(ctx, g.stagingDir, "pull", "--rebase", "-X", "ours")
 	if err != nil {
 		conflicts, conflictsErr := g.conflictedFiles(ctx)
 		isConflict := (conflictsErr == nil && len(conflicts) > 0) || looksLikeConflict(out, err)
