@@ -33,7 +33,7 @@ jobs:
             GOARCH="${TARGET#*/}"
             OUT="negent-${VERSION}-${GOOS}-${GOARCH}"
 
-            GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o negent .
+            GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o negent .
             tar -czf "dist/${OUT}.tar.gz" negent LICENSE README.md
           done
 

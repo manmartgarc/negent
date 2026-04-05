@@ -20,6 +20,19 @@ go test ./...
 go vet ./...
 ```
 
+## Commit messages
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/). Commit messages drive automated version bumping and changelog generation via [release-please](https://github.com/googleapis/release-please), so getting them right matters.
+
+| Prefix | Version bump | Example |
+| --- | --- | --- |
+| `fix:` | Patch (`0.0.x`) | `fix(sync): handle empty staging dir` |
+| `feat:` | Minor (`0.x.0`) | `feat(cli): add diff command` |
+| `feat!:` or `BREAKING CHANGE` footer | Major (`x.0.0`) | `feat!: rename config keys` |
+| `chore:`, `docs:`, `ci:`, `test:`, `refactor:` | No release | `docs: update install instructions` |
+
+Scopes are optional but encouraged: `cli`, `plugin`, `sync`, `agent`, `config`, `ci`.
+
 ## Making changes
 
 1. Create a branch for your work.
@@ -41,7 +54,19 @@ Please include:
 - A clear summary of what changed and why
 - Any behavior or UX impact
 - Notes about migration or compatibility impact (if any)
-- Changelog updates in `CHANGELOG.md` for user-visible changes that should appear in release notes
+
+Do **not** manually edit `CHANGELOG.md` — release-please generates it from commit messages.
+
+## Releases
+
+Releases are fully automated via [release-please](https://github.com/googleapis/release-please):
+
+1. Merge conventional commits to `main`.
+2. release-please opens (or updates) a **Release PR** that bumps the version in both the CLI and plugin, and updates `CHANGELOG.md`.
+3. When you merge the Release PR, release-please creates a git tag (`vX.Y.Z`) and a GitHub Release.
+4. The tag triggers the release workflow which builds cross-platform binaries and publishes them.
+
+The CLI binary version and the plugin version (`plugin/.claude-plugin/plugin.json`) are always kept in sync.
 
 ## Scope notes
 
