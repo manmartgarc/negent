@@ -50,11 +50,16 @@ auto_install() {
     *)       echo "Unsupported arch: $(uname -m)" >&2; return 1 ;;
   esac
 
-  local version
-  version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-    | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+  local response version
+  response=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>&1) || {
+    echo "negent: no releases found at https://github.com/${REPO}/releases" >&2
+    echo "negent: install manually via 'go install github.com/manmartgarc/negent@latest' or download a release binary" >&2
+    return 1
+  }
+  version=$(echo "$response" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/' || true)
   if [ -z "$version" ]; then
-    echo "Failed to fetch latest version" >&2
+    echo "negent: no releases found at https://github.com/${REPO}/releases" >&2
+    echo "negent: install manually via 'go install github.com/manmartgarc/negent@latest' or download a release binary" >&2
     return 1
   fi
 
@@ -70,7 +75,8 @@ auto_install() {
 
 NEGENT=$(find_negent) || {
   auto_install || {
-    echo "negent: auto-install failed. Download manually from https://github.com/${REPO}/releases" >&2
+    echo "negent: binary not found and auto-install failed" >&2
+    echo "negent: install manually via 'go install github.com/manmartgarc/negent@latest' or download from https://github.com/${REPO}/releases" >&2
     exit 0  # exit 0 so hook doesn't block the session
   }
   NEGENT="${INSTALL_DIR}/negent"
