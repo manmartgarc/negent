@@ -56,7 +56,7 @@ Cobra commands: `init` (interactive setup via charmbracelet/huh), `add`, `push`,
 The CLI is interactive by default (e.g., `init` uses TUI prompts, `conflicts` opens an interactive resolver) but every command must also be fully usable non-interactively via flags. This allows scripting, CI usage, and piping. For example, `conflicts --list` lists without prompting, `conflicts --keep-remote` resolves all without interaction.
 
 ### Plugin (`plugin/`)
-Claude Code plugin providing slash commands and auto-sync hooks. Contains `.claude-plugin/plugin.json` manifest, `commands/` markdown files for `/negent:push`, `/negent:pull`, etc., and `hooks/hooks.json` for SessionStart/Stop automation. Distributed via npm alongside the Go binary.
+Claude Code plugin providing slash commands and auto-sync hooks. Contains `.claude-plugin/plugin.json` manifest, `commands/` markdown files for `/negent:push`, `/negent:pull`, etc., and `hooks/hooks.json` for SessionStart/Stop automation. The plugin's `scripts/sync.sh` auto-installs the negent binary from GitHub Releases if not found locally.
 
 ## Key Patterns
 

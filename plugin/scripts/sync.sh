@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Locate and run negent with the given arguments.
-# Checks PATH first, then common install locations.
+# Checks PATH first, then common install locations, then auto-installs
+# from GitHub Releases if not found.
 set -euo pipefail
+
+REPO="manmartgarc/negent"
+INSTALL_DIR="${HOME}/.local/bin"
 
 find_negent() {
   if command -v negent &>/dev/null; then
@@ -24,12 +28,52 @@ find_negent() {
     return
   fi
 
+  # auto-installed binary
+  if [ -x "${INSTALL_DIR}/negent" ]; then
+    echo "${INSTALL_DIR}/negent"
+    return
+  fi
+
   return 1
 }
 
+auto_install() {
+  local platform arch
+  case "$(uname -s)" in
+    Darwin) platform="darwin" ;;
+    Linux)  platform="linux" ;;
+    *)      echo "Unsupported OS: $(uname -s)" >&2; return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64)  arch="amd64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *)       echo "Unsupported arch: $(uname -m)" >&2; return 1 ;;
+  esac
+
+  local version
+  version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+    | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+  if [ -z "$version" ]; then
+    echo "Failed to fetch latest version" >&2
+    return 1
+  fi
+
+  local asset="negent-${version}-${platform}-${arch}.tar.gz"
+  local url="https://github.com/${REPO}/releases/download/${version}/${asset}"
+
+  echo "Installing negent ${version} (${platform}-${arch})..." >&2
+  mkdir -p "${INSTALL_DIR}"
+  curl -fsSL "$url" | tar -xz -C "${INSTALL_DIR}" negent
+  chmod +x "${INSTALL_DIR}/negent"
+  echo "Installed negent to ${INSTALL_DIR}/negent" >&2
+}
+
 NEGENT=$(find_negent) || {
-  echo "negent not found. Install with: npm install -g negent" >&2
-  exit 0  # exit 0 so hook doesn't block the session
+  auto_install || {
+    echo "negent: auto-install failed. Download manually from https://github.com/${REPO}/releases" >&2
+    exit 0  # exit 0 so hook doesn't block the session
+  }
+  NEGENT="${INSTALL_DIR}/negent"
 }
 
 exec "$NEGENT" "$@"

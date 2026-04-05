@@ -24,25 +24,17 @@
 
 ## Installation
 
-### Option 1: npm (recommended)
-
-```bash
-npm install -g negent
-```
-
-This downloads the prebuilt binary for your platform and includes the Claude Code plugin.
-
-### Option 2: Go install
+### Option 1: Go install
 
 ```bash
 go install github.com/manmart/negent@latest
 ```
 
-### Option 3: Prebuilt binaries
+### Option 2: Prebuilt binaries
 
 Download artifacts from [GitHub Releases](https://github.com/manmart/negent/releases) (published for tagged versions).
 
-### Option 4: Build from source
+### Option 3: Build from source
 
 ```bash
 git clone https://github.com/manmart/negent.git
@@ -118,14 +110,7 @@ negent ships as a Claude Code [plugin](https://code.claude.com/docs/en/plugins) 
 /plugin install negent@negent
 ```
 
-**Option B: npm plugin directory**
-
-```bash
-npm install -g negent
-claude --plugin-dir $(npm root -g)/negent/plugin
-```
-
-**Option C: Local development**
+**Option B: Local development**
 
 ```bash
 claude --plugin-dir ./plugin
