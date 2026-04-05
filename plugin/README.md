@@ -4,12 +4,21 @@ A Claude Code plugin that provides slash commands and auto-sync hooks for [negen
 
 ## Installation
 
+From inside Claude Code:
+
+```shell
+/plugin marketplace add manmartgarc/negent
+/plugin install negent@negent
+```
+
+From your shell:
+
 ```bash
 claude plugin marketplace add manmartgarc/negent
 claude plugin install negent@negent
 ```
 
-The plugin auto-installs the `negent` binary from [GitHub Releases](https://github.com/manmartgarc/negent/releases) on first run if not already installed.
+The plugin auto-installs the `negent` binary from [GitHub Releases](https://github.com/manmartgarc/negent/releases) on first run if it is not already available on your `PATH`.
 
 ## Commands
 

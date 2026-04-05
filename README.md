@@ -105,10 +105,21 @@ negent ships as a Claude Code [plugin](https://code.claude.com/docs/en/plugins) 
 
 **Option A: Marketplace** (recommended)
 
+From inside Claude Code:
+
 ```shell
-/plugin marketplace add manmart/negent
+/plugin marketplace add manmartgarc/negent
 /plugin install negent@negent
 ```
+
+From your shell:
+
+```bash
+claude plugin marketplace add manmartgarc/negent
+claude plugin install negent@negent
+```
+
+The plugin auto-installs the `negent` binary from [GitHub Releases](https://github.com/manmartgarc/negent/releases) on first run if it is not already available on your `PATH`.
 
 **Option B: Local development**
 
