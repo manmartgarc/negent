@@ -1,8 +1,16 @@
-# negent
+<p align="center">
+    <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://github.com/manmartgarc/negent/blob/main/docs/dark-logo.svg">
+        <source media="(prefers-color-scheme: light)" srcset="https://github.com/manmartgarc/negent/blob/main/docs/light-logo.svg">
+        <img alt="negent — Agent-agnostic dotfile sync" width="600" src="https://github.com/manmartgarc/negent/blob/main/docs/light-logo.svg">
+    </picture>
+</p>
 
-[![CI](https://github.com/manmartgarc/negent/actions/workflows/ci.yml/badge.svg)](https://github.com/manmartgarc/negent/actions/workflows/ci.yml)
-[![Release](https://github.com/manmartgarc/negent/actions/workflows/release-please.yml/badge.svg)](https://github.com/manmartgarc/negent/actions/workflows/release-please.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+<p align="center">
+    <a href="https://github.com/manmartgarc/negent/actions/workflows/ci.yml"><img src="https://github.com/manmartgarc/negent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/manmartgarc/negent/actions/workflows/release-please.yml"><img src="https://github.com/manmartgarc/negent/actions/workflows/release-please.yml/badge.svg" alt="Release"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+</p>
 
 `negent` syncs AI coding assistant config and memory files across machines using a git-backed remote store.
 
