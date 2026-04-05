@@ -47,27 +47,6 @@ go vet ./...
 
 The pre-commit hook updates and stages `README.md` command table entries automatically.
 
-## Pull requests
-
-Please include:
-
-- A clear summary of what changed and why
-- Any behavior or UX impact
-- Notes about migration or compatibility impact (if any)
-
-Do **not** manually edit `CHANGELOG.md` — release-please generates it from commit messages.
-
 ## Releases
 
-Releases are fully automated via [release-please](https://github.com/googleapis/release-please):
-
-1. Merge conventional commits to `main`.
-2. release-please opens (or updates) a **Release PR** that bumps the version in both the CLI and plugin, and updates `CHANGELOG.md`.
-3. When you merge the Release PR, release-please creates a git tag (`vX.Y.Z`) and a GitHub Release.
-4. The tag triggers the release workflow which builds cross-platform binaries and publishes them.
-
-The CLI binary version and the plugin version (`plugin/.claude-plugin/plugin.json`) are always kept in sync.
-
-## Scope notes
-
-Current implementation is Claude-focused; additions for other agents are welcome as incremental, well-tested contributions.
+Releases are automated via [release-please](https://github.com/googleapis/release-please) — do **not** manually edit `CHANGELOG.md`.

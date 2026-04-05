@@ -153,45 +153,6 @@ The plugin automatically syncs on session start (push then pull) and session sto
 
 Alternatively, `negent auto enable` installs hooks directly into `~/.claude/settings.json`. The plugin approach above is preferred.
 
-## Configuration
-
-Default path:
-
-```text
-~/.config/negent/config.yaml
-```
-
-Top-level fields:
-
-- `backend`: currently `git`
-- `repo`: remote URL for sync storage
-- `machine`: machine label used in sync metadata
-- `agents`: per-agent source and sync-type settings
-
-## Sync types and data model
-
-- Claude sync-type taxonomy and exclusions: [`docs/agent-sync-types.md`](docs/agent-sync-types.md)
-- GitHub Copilot CLI sync-type taxonomy and exclusions: [`docs/agent-sync-types.md`](docs/agent-sync-types.md)
-
-## Development
-
-```bash
-go build -o negent .
-go test ./...
-go test ./internal/sync/ -run TestPushPull
-go test -cover ./...
-go vet ./...
-```
-
-## Documentation and community
-
-- Launch runbook: [docs/launch-runbook.md](docs/launch-runbook.md)
-- Changelog: [CHANGELOG.md](CHANGELOG.md)
-- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Security policy: [SECURITY.md](SECURITY.md)
-- Support: [SUPPORT.md](SUPPORT.md)
-- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-
 ## License
 
 MIT — see [LICENSE](LICENSE).

@@ -11,4 +11,3 @@
 - [ ] I ran `go test ./...`
 - [ ] I ran `go vet ./...`
 - [ ] I updated docs for user-visible changes
-- [ ] I updated `CHANGELOG.md` when release notes are needed
