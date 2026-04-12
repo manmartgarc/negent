@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/manmartgarc/negent/compare/v0.3.2...v0.3.3) (2026-04-12)
+
+
+### Features
+
+* **copilot:** sync session-state data ([9c3d066](https://github.com/manmartgarc/negent/commit/9c3d0661ccfd85e150a647641d14c1631405ad1b))
+
 ## [0.3.2](https://github.com/manmartgarc/negent/compare/v0.3.1...v0.3.2) (2026-04-05)
 
 
