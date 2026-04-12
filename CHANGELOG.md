@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/manmartgarc/negent/compare/v0.3.5...v0.3.6) (2026-04-12)
+
+
+### Bug Fixes
+
+* **sync:** harden atomic file writes ([b2de9e1](https://github.com/manmartgarc/negent/commit/b2de9e19736d189c5710b00ede5d222da9b3d38e))
+
 ## [0.3.5](https://github.com/manmartgarc/negent/compare/v0.3.4...v0.3.5) (2026-04-12)
 
 
