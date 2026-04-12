@@ -24,12 +24,16 @@ go vet ./...
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/). Commit messages drive automated version bumping and changelog generation via [release-please](https://github.com/googleapis/release-please), so getting them right matters.
 
-| Prefix | Version bump | Example |
+The repository is currently on a pre-1.0 release line, and `release-please` is configured to use conservative pre-1.0 bumps:
+
+| Prefix | Current bump behavior (`0.x`) | Example |
 | --- | --- | --- |
 | `fix:` | Patch (`0.0.x`) | `fix(sync): handle empty staging dir` |
-| `feat:` | Minor (`0.x.0`) | `feat(cli): add diff command` |
-| `feat!:` or `BREAKING CHANGE` footer | Major (`x.0.0`) | `feat!: rename config keys` |
+| `feat:` | Patch (`0.0.x`) | `feat(cli): add diff command` |
+| `feat!:` or `BREAKING CHANGE` footer | Minor (`0.x.0`) | `feat!: rename config keys` |
 | `chore:`, `docs:`, `ci:`, `test:`, `refactor:` | No release | `docs: update install instructions` |
+
+Once the project moves to `1.0.0+`, standard semantic versioning expectations apply again: `fix` bumps patch, `feat` bumps minor, and breaking changes bump major.
 
 Scopes are optional but encouraged: `cli`, `plugin`, `sync`, `agent`, `config`, `ci`.
 
@@ -50,3 +54,4 @@ The pre-commit hook updates and stages `README.md` command table entries automat
 ## Releases
 
 Releases are automated via [release-please](https://github.com/googleapis/release-please) — do **not** manually edit `CHANGELOG.md`.
+While the project remains below `1.0.0`, release automation is configured so `feat:` commits produce patch releases and breaking changes produce minor releases.
