@@ -111,6 +111,8 @@ negent ships as a plugin for GitHub Copilot CLI and Claude Code with the same `/
 
 ### GitHub Copilot CLI
 
+See GitHub's [plugin installation docs](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/plugins-finding-installing) for marketplace and direct repository install options.
+
 **Option A: Marketplace** (recommended)
 
 From inside Copilot:
@@ -127,7 +129,13 @@ copilot plugin marketplace add manmartgarc/negent
 copilot plugin install negent@negent
 ```
 
-**Option B: Local development**
+**Option B: Direct from GitHub**
+
+```bash
+copilot plugin install manmartgarc/negent:plugin
+```
+
+**Option C: Local development**
 
 ```bash
 copilot --plugin-dir ./plugin

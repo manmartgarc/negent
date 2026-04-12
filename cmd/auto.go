@@ -18,11 +18,15 @@ Note: consider using the negent Claude Code or GitHub Copilot CLI plugin
 instead for a cleaner integration with slash commands and automatic hook
 management:
 
+  https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/plugins-finding-installing
+
   claude plugin marketplace add manmartgarc/negent
   claude plugin install negent@negent
 
   copilot plugin marketplace add manmartgarc/negent
-  copilot plugin install negent@negent`,
+  copilot plugin install negent@negent
+
+  copilot plugin install manmartgarc/negent:plugin`,
 }
 
 var autoAgentFlag string

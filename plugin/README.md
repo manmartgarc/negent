@@ -6,6 +6,8 @@ A shared plugin package for GitHub Copilot CLI and Claude Code that provides sla
 
 ### GitHub Copilot CLI
 
+See GitHub's [plugin installation docs](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/plugins-finding-installing) for marketplace and direct repository install options.
+
 From inside Copilot:
 
 ```shell
@@ -18,6 +20,12 @@ From your shell:
 ```bash
 copilot plugin marketplace add manmartgarc/negent
 copilot plugin install negent@negent
+```
+
+Or install directly from GitHub without adding the marketplace:
+
+```bash
+copilot plugin install manmartgarc/negent:plugin
 ```
 
 ### Claude Code
