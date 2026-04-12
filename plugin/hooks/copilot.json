@@ -4,16 +4,16 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "./session-start.sh",
-        "cwd": "scripts",
+        "bash": "./scripts/session-start.sh",
+        "powershell": "./scripts/session-start.ps1",
         "timeoutSec": 180
       }
     ],
     "sessionEnd": [
       {
         "type": "command",
-        "bash": "./session-end.sh",
-        "cwd": "scripts",
+        "bash": "./scripts/session-end.sh",
+        "powershell": "./scripts/session-end.ps1",
         "timeoutSec": 120
       }
     ]

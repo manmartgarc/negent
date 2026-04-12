@@ -36,3 +36,6 @@ negent
 
 # Claude Code
 .claude/
+
+# Codex
+.codex
