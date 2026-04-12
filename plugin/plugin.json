@@ -1,0 +1,13 @@
+{
+  "name": "negent",
+  "description": "Sync AI assistant dotfiles across machines via git",
+  "version": "0.3.3",
+  "author": {
+    "name": "Manuel Martinez"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/manmartgarc/negent",
+  "repository": "https://github.com/manmartgarc/negent",
+  "commands": "commands",
+  "hooks": "hooks/copilot.json"
+}

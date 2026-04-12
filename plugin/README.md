@@ -1,8 +1,26 @@
-# negent Plugin for Claude Code
+# negent Plugin
 
-A Claude Code plugin that provides slash commands and auto-sync hooks for [negent](https://github.com/manmart/negent).
+A shared plugin package for GitHub Copilot CLI and Claude Code that provides slash commands and auto-sync hooks for [negent](https://github.com/manmart/negent).
 
 ## Installation
+
+### GitHub Copilot CLI
+
+From inside Copilot:
+
+```shell
+/plugin marketplace add manmartgarc/negent
+/plugin install negent@negent
+```
+
+From your shell:
+
+```bash
+copilot plugin marketplace add manmartgarc/negent
+copilot plugin install negent@negent
+```
+
+### Claude Code
 
 From inside Claude Code:
 
@@ -38,6 +56,22 @@ The plugin automatically syncs on:
 - **Session stop**: pushes final state
 
 ## Development
+
+### GitHub Copilot CLI
+
+Load the plugin from the working tree:
+
+```bash
+copilot --plugin-dir ./plugin
+```
+
+If you test via install instead, reinstall after each change because Copilot caches plugin contents:
+
+```bash
+copilot plugin install ./plugin
+```
+
+### Claude Code
 
 Load the plugin locally for testing:
 

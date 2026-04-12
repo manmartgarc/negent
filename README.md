@@ -105,11 +105,43 @@ negent conflicts
 | `push` | Push local agent configs to the remote |
 | `status` | Show sync status for configured agents |
 
-## Claude Code plugin
+## Plugins
 
-negent ships as a Claude Code [plugin](https://code.claude.com/docs/en/plugins) with slash commands and auto-sync hooks.
+negent ships as a plugin for GitHub Copilot CLI and Claude Code with the same `/negent:*` commands and auto-sync hooks.
 
-### Install the plugin
+### GitHub Copilot CLI
+
+**Option A: Marketplace** (recommended)
+
+From inside Copilot:
+
+```shell
+/plugin marketplace add manmartgarc/negent
+/plugin install negent@negent
+```
+
+From your shell:
+
+```bash
+copilot plugin marketplace add manmartgarc/negent
+copilot plugin install negent@negent
+```
+
+**Option B: Local development**
+
+```bash
+copilot --plugin-dir ./plugin
+```
+
+If you test via install instead, reinstall after changes because Copilot caches plugin contents:
+
+```bash
+copilot plugin install ./plugin
+```
+
+### Claude Code
+
+negent also ships as a Claude Code [plugin](https://code.claude.com/docs/en/plugins).
 
 **Option A: Marketplace** (recommended)
 
@@ -135,7 +167,7 @@ The plugin auto-installs the `negent` binary from [GitHub Releases](https://gith
 claude --plugin-dir ./plugin
 ```
 
-### Slash commands
+### Plugin commands
 
 | Command | Description |
 | --- | --- |

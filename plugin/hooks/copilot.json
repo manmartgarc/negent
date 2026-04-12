@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "./session-start.sh",
+        "cwd": "scripts",
+        "timeoutSec": 180
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "./session-end.sh",
+        "cwd": "scripts",
+        "timeoutSec": 120
+      }
+    ]
+  }
+}

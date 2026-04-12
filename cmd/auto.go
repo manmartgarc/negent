@@ -14,11 +14,15 @@ var autoCmd = &cobra.Command{
 	Short: "Manage automatic sync hooks",
 	Long: `Install or remove hooks that automatically run 'negent pull' at session start and 'negent push' at session end.
 
-Note: consider using the negent Claude Code plugin instead for a cleaner
-integration with slash commands and automatic hook management:
+Note: consider using the negent Claude Code or GitHub Copilot CLI plugin
+instead for a cleaner integration with slash commands and automatic hook
+management:
 
   claude plugin marketplace add manmartgarc/negent
-  claude plugin install negent@negent`,
+  claude plugin install negent@negent
+
+  copilot plugin marketplace add manmartgarc/negent
+  copilot plugin install negent@negent`,
 }
 
 var autoAgentFlag string
