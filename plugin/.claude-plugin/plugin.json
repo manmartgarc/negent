@@ -1,8 +1,0 @@
-{
-  "name": "negent",
-  "description": "Sync AI assistant dotfiles across machines via git",
-  "version": "0.3.4",
-  "author": {
-    "name": "Manuel Martinez"
-  }
-}
