@@ -320,3 +320,44 @@ func TestStatusInvalidJSON(t *testing.T) {
 		t.Fatal("expected error on invalid JSON, got nil")
 	}
 }
+
+func TestWriteFileAtomic_RemovesTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	if err := writeFileAtomic(path, []byte(`{"hooks":{}}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	matches, err := filepath.Glob(path + ".*.negent.tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temp files should be removed, found %v", matches)
+	}
+}
+
+func TestWriteFileAtomic_PreservesExistingPermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	if err := os.WriteFile(path, []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeFileAtomic(path, []byte(`{"hooks":{"Stop":[]}}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("file mode = %o, want %o", got, 0o600)
+	}
+}

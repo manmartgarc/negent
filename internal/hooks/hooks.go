@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const defaultAtomicFilePerm = 0o644
+
 // isNegentCommand reports whether command was installed by negent.
 // It matches both bare "negent" and full-path invocations like
 // "/usr/local/bin/negent" by comparing the base name of the first word.
@@ -234,16 +236,48 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("creating parent directory: %w", err)
 	}
-	tmp := path + ".negent.tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf("writing temp file: %w", err)
+	perm, err := targetFilePerm(path)
+	if err != nil {
+		return fmt.Errorf("stating target file: %w", err)
+	}
+
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.negent.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmp := f.Name()
+
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return cleanupTempFile(tmp, fmt.Errorf("writing temp file: %w", err))
+	}
+	if err := f.Close(); err != nil {
+		return cleanupTempFile(tmp, fmt.Errorf("closing temp file: %w", err))
+	}
+	if err := os.Chmod(tmp, perm); err != nil {
+		return cleanupTempFile(tmp, fmt.Errorf("setting temp file mode: %w", err))
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		removeErr := os.Remove(tmp)
-		if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			return fmt.Errorf("renaming temp file: %w (cleanup failed: %v)", err, removeErr)
-		}
-		return fmt.Errorf("renaming temp file: %w", err)
+		return cleanupTempFile(tmp, fmt.Errorf("renaming temp file: %w", err))
 	}
 	return nil
+}
+
+func cleanupTempFile(path string, err error) error {
+	removeErr := os.Remove(path)
+	if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return fmt.Errorf("%w (cleanup failed: %v)", err, removeErr)
+	}
+	return err
+}
+
+func targetFilePerm(path string) (os.FileMode, error) {
+	info, err := os.Stat(path)
+	if err == nil {
+		return info.Mode().Perm(), nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return defaultAtomicFilePerm, nil
+	}
+	return 0, err
 }

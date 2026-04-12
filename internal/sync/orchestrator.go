@@ -519,7 +519,7 @@ func mergeAppendOnly(src, dst string) error {
 			}
 			return syncAppendOnlyPair(src, dst)
 		}
-		return os.WriteFile(dst, srcData, 0o644)
+		return writeBytesAtomic(dst, srcData)
 	}
 
 	if filepath.Base(dst) == "history.jsonl" || filepath.Base(src) == "history.jsonl" {
@@ -529,13 +529,13 @@ func mergeAppendOnly(src, dst string) error {
 		return syncAppendOnlyPair(src, dst)
 	}
 
-	dstLines := strings.Split(strings.TrimRight(string(dstData), "\n"), "\n")
+	dstLines := splitAppendOnlyLines(dstData)
 	existing := make(map[string]struct{}, len(dstLines))
 	for _, line := range dstLines {
 		existing[line] = struct{}{}
 	}
 
-	srcLines := strings.Split(strings.TrimRight(string(srcData), "\n"), "\n")
+	srcLines := splitAppendOnlyLines(srcData)
 	var newLines []string
 	for _, line := range srcLines {
 		if _, ok := existing[line]; !ok {
@@ -547,14 +547,8 @@ func mergeAppendOnly(src, dst string) error {
 		return nil
 	}
 
-	f, err := os.OpenFile(dst, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	_, err = f.WriteString(strings.Join(newLines, "\n") + "\n")
-	return err
+	mergedLines := append(dstLines, newLines...)
+	return writeBytesAtomic(dst, []byte(strings.Join(mergedLines, "\n")+"\n"))
 }
 
 func syncAppendOnlyPair(src, dst string) error {
@@ -562,32 +556,31 @@ func syncAppendOnlyPair(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(src, merged, 0o644); err != nil {
+	if err := writeBytesAtomic(src, merged); err != nil {
 		return err
 	}
 	return nil
 }
 
+func splitAppendOnlyLines(data []byte) []string {
+	trimmed := strings.TrimRight(string(data), "\n")
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "\n")
+}
+
 // copyFile copies a file from src to dst, creating parent directories as needed.
 func copyFile(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
 
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, in)
-	return err
+	return writeFileAtomic(dst, func(out io.Writer) error {
+		return copyToWriter(in, out)
+	})
 }
 
 func snapshotBase(stagingDir string, agents map[string]agent.Agent, syncTypes map[string][]agent.SyncType) (map[string]map[string][]byte, error) {

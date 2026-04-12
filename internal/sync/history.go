@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 )
@@ -85,12 +86,12 @@ func readHistoryFile(path string) ([]historyEntry, error) {
 
 // writeHistoryFile writes entries as JSONL, using the original raw lines.
 func writeHistoryFile(path string, entries []historyEntry) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+	return writeFileAtomic(path, func(f io.Writer) error {
+		return writeHistoryEntries(f, entries)
+	})
+}
 
+func writeHistoryEntries(f io.Writer, entries []historyEntry) error {
 	w := bufio.NewWriter(f)
 	for _, e := range entries {
 		if _, err := w.WriteString(e.raw + "\n"); err != nil {

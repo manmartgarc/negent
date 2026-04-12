@@ -563,6 +563,27 @@ func TestPushNewSessionCopied(t *testing.T) {
 	}
 }
 
+func TestMergeAppendOnly_EmptySourceDoesNotAddBlankLine(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.jsonl")
+	dst := filepath.Join(dir, "dst.jsonl")
+
+	mustNoErr(t, os.WriteFile(src, []byte(""), 0o644))
+	mustNoErr(t, os.WriteFile(dst, []byte("line-A\nline-B\n"), 0o644))
+
+	if err := mergeAppendOnly(src, dst); err != nil {
+		t.Fatalf("mergeAppendOnly: %v", err)
+	}
+
+	merged, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("reading merged file: %v", err)
+	}
+	if string(merged) != "line-A\nline-B\n" {
+		t.Fatalf("merged content = %q, want %q", string(merged), "line-A\nline-B\n")
+	}
+}
+
 func TestPullNoData(t *testing.T) {
 	be := newMockBackend(t)
 	// agentDir does not exist — simulates a remote with no data for this agent.
