@@ -34,10 +34,12 @@ func setupTestDir(t *testing.T) string {
 	writeFile(t, filepath.Join(dir, "skills", "git", "logs", "example.txt"), "keep me")
 	writeFile(t, filepath.Join(dir, "hooks", "pre-run.sh"), "#!/bin/sh")
 	writeFile(t, filepath.Join(dir, "hooks", "ide", "bootstrap.sh"), "#!/bin/sh")
+	writeFile(t, filepath.Join(dir, "session-state", "resume.json"), `{"id":"123"}`)
+	writeFile(t, filepath.Join(dir, "session-state", "s1", "events.jsonl"), `{"event":"start"}`)
+	writeFile(t, filepath.Join(dir, "session-state", "s1", "plan.md"), "# plan")
 
 	writeFile(t, filepath.Join(dir, "permissions-config.json"), `{"allow":[]}`)
 	writeFile(t, filepath.Join(dir, "session-store.db"), "sqlite")
-	writeFile(t, filepath.Join(dir, "session-state", "resume.json"), `{"id":"123"}`)
 	writeFile(t, filepath.Join(dir, "logs", "copilot.log"), "log")
 	writeFile(t, filepath.Join(dir, "installed-plugins", "plugin.json"), `{"name":"x"}`)
 	writeFile(t, filepath.Join(dir, "ide", "state.json"), `{"window":1}`)
@@ -100,7 +102,21 @@ func TestNormalizeSyncTypes(t *testing.T) {
 		}
 	}
 
-	if _, err := c.NormalizeSyncTypes([]string{"sessions"}); err == nil {
+	got, err = c.NormalizeSyncTypes([]string{"config", "sessions", "config"})
+	if err != nil {
+		t.Fatalf("NormalizeSyncTypes() with sessions error = %v", err)
+	}
+	want = []agent.SyncType{SyncTypeConfig, SyncTypeSessions}
+	if len(got) != len(want) {
+		t.Fatalf("NormalizeSyncTypes() with sessions returned %d items, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("NormalizeSyncTypes() with sessions[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	if _, err := c.NormalizeSyncTypes([]string{"unknown"}); err == nil {
 		t.Fatal("NormalizeSyncTypes() should reject unsupported sync types")
 	}
 }
@@ -112,7 +128,7 @@ func TestSyncTypeForPath(t *testing.T) {
 		"agents/reviewer.md":     SyncTypeAgents,
 		"skills/git/SKILL.md":    SyncTypeSkills,
 		"hooks/pre-run.sh":       SyncTypeHooks,
-		"session-state/run.json": "",
+		"session-state/run.json": SyncTypeSessions,
 	}
 
 	for relPath, want := range tests {
@@ -168,8 +184,38 @@ func TestCollectExcludesManagedState(t *testing.T) {
 
 	for _, f := range files {
 		switch f.RelPath {
-		case "permissions-config.json", "session-store.db", "session-state/resume.json", "logs/copilot.log", "installed-plugins/plugin.json", "ide/state.json":
+		case "permissions-config.json", "session-store.db", "logs/copilot.log", "installed-plugins/plugin.json", "ide/state.json":
 			t.Fatalf("Collect() unexpectedly included excluded path %q", f.RelPath)
+		}
+	}
+}
+
+func TestCollectIncludesSessionsWhenEnabled(t *testing.T) {
+	dir := setupTestDir(t)
+	c := New(dir)
+
+	files, err := c.Collect([]agent.SyncType{SyncTypeSessions})
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+
+	got := make(map[string]agent.SyncType, len(files))
+	for _, f := range files {
+		got[f.RelPath] = f.Type
+	}
+
+	want := map[string]agent.SyncType{
+		"session-state/resume.json":     SyncTypeSessions,
+		"session-state/s1/events.jsonl": SyncTypeSessions,
+		"session-state/s1/plan.md":      SyncTypeSessions,
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("Collect() with sessions returned %d files, want %d", len(got), len(want))
+	}
+	for relPath, wantType := range want {
+		if got[relPath] != wantType {
+			t.Fatalf("Collect() with sessions missing or wrong type for %q: got %q want %q", relPath, got[relPath], wantType)
 		}
 	}
 }
@@ -260,6 +306,21 @@ func TestDiffReportsReplaceModeChanges(t *testing.T) {
 		if got[path] != kind {
 			t.Fatalf("Diff() for %q = %q, want %q", path, got[path], kind)
 		}
+	}
+}
+
+func TestDiffSkipsDeletingRemoteOnlySessionStateFiles(t *testing.T) {
+	sourceDir := t.TempDir()
+	stagingDir := t.TempDir()
+	writeFile(t, filepath.Join(stagingDir, "session-state", "remote", "events.jsonl"), `{"event":"remote"}`)
+
+	c := New(sourceDir)
+	changes, err := c.Diff(stagingDir, []agent.SyncType{SyncTypeSessions})
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("Diff() returned %d changes, want 0", len(changes))
 	}
 }
 

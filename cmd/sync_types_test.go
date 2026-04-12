@@ -63,7 +63,7 @@ func TestBuildAgentsConstructsCopilot(t *testing.T) {
 		Agents: map[string]config.AgentConfig{
 			"copilot": {
 				Source: "~/.copilot",
-				Sync:   []string{"config", "mcp", "agents", "skills", "hooks"},
+				Sync:   []string{"config", "mcp", "agents", "skills", "hooks", "sessions"},
 			},
 		},
 	}
@@ -83,6 +83,7 @@ func TestBuildAgentsConstructsCopilot(t *testing.T) {
 		string(copilot.SyncTypeAgents),
 		string(copilot.SyncTypeSkills),
 		string(copilot.SyncTypeHooks),
+		string(copilot.SyncTypeSessions),
 	}
 
 	got := syncTypes["copilot"]

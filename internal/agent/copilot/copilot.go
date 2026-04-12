@@ -13,11 +13,12 @@ import (
 const Name = "copilot"
 
 const (
-	SyncTypeConfig agent.SyncType = "config"
-	SyncTypeMCP    agent.SyncType = "mcp"
-	SyncTypeAgents agent.SyncType = "agents"
-	SyncTypeSkills agent.SyncType = "skills"
-	SyncTypeHooks  agent.SyncType = "hooks"
+	SyncTypeConfig   agent.SyncType = "config"
+	SyncTypeMCP      agent.SyncType = "mcp"
+	SyncTypeAgents   agent.SyncType = "agents"
+	SyncTypeSkills   agent.SyncType = "skills"
+	SyncTypeHooks    agent.SyncType = "hooks"
+	SyncTypeSessions agent.SyncType = "sessions"
 )
 
 type collectionRule struct {
@@ -31,14 +32,16 @@ var syncTypeSpecs = []agent.SyncTypeSpec{
 	{ID: SyncTypeAgents, Label: "Agents", Description: "Custom agents under agents/.", Group: "prompts", Default: true, Mode: agent.SyncModeReplace, Reference: "https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference"},
 	{ID: SyncTypeSkills, Label: "Skills", Description: "Custom skills under skills/.", Group: "prompts", Default: true, Mode: agent.SyncModeReplace, Reference: "https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference"},
 	{ID: SyncTypeHooks, Label: "Hooks", Description: "Hook scripts and config under hooks/.", Group: "automation", Default: true, Mode: agent.SyncModeReplace, Reference: "https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference"},
+	{ID: SyncTypeSessions, Label: "Sessions", Description: "Session history and workspace data under session-state/.", Group: "history", Default: false, Mode: agent.SyncModeReplace, Reference: "https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference"},
 }
 
 var syncTypeRules = map[agent.SyncType][]collectionRule{
-	SyncTypeConfig: {{Glob: "config.json"}},
-	SyncTypeMCP:    {{Glob: "mcp-config.json"}},
-	SyncTypeAgents: {{Dir: "agents"}},
-	SyncTypeSkills: {{Dir: "skills"}},
-	SyncTypeHooks:  {{Dir: "hooks"}},
+	SyncTypeConfig:   {{Glob: "config.json"}},
+	SyncTypeMCP:      {{Glob: "mcp-config.json"}},
+	SyncTypeAgents:   {{Dir: "agents"}},
+	SyncTypeSkills:   {{Dir: "skills"}},
+	SyncTypeHooks:    {{Dir: "hooks"}},
+	SyncTypeSessions: {{Dir: "session-state"}},
 }
 
 var excludedFiles = map[string]bool{
@@ -47,7 +50,6 @@ var excludedFiles = map[string]bool{
 }
 
 var excludedDirs = map[string]bool{
-	"session-state":     true,
 	"logs":              true,
 	"installed-plugins": true,
 	"ide":               true,
@@ -288,6 +290,11 @@ func (c *Copilot) Diff(stagingDir string, syncTypes []agent.SyncType) ([]backend
 			if !typeSet[syncType] {
 				return nil
 			}
+			if syncType == SyncTypeSessions {
+				// Session-state entries are machine-local and should union across
+				// machines instead of deleting remote-only artifacts.
+				return nil
+			}
 
 			changes = append(changes, backend.FileChange{Path: relPath, Kind: backend.ChangeDeleted})
 			return nil
@@ -316,6 +323,8 @@ func syncTypeForPath(relPath string) agent.SyncType {
 		return SyncTypeSkills
 	case strings.HasPrefix(relPath, "hooks/"):
 		return SyncTypeHooks
+	case strings.HasPrefix(relPath, "session-state/"):
+		return SyncTypeSessions
 	default:
 		return ""
 	}

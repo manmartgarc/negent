@@ -91,6 +91,7 @@ Negent syncs these Copilot-specific type IDs:
 - `agents`: `agents/`
 - `skills`: `skills/`
 - `hooks`: `hooks/`
+- `sessions`: `session-state/` (non-default)
 
 Default Copilot sync types:
 
@@ -100,10 +101,9 @@ Default Copilot sync types:
 - `skills`
 - `hooks`
 
-Negent intentionally does not sync these Copilot files in this phase:
+Negent intentionally does not sync these Copilot files:
 
 - `permissions-config.json`
-- `session-state/`
 - `session-store.db`
 - `logs/`
 - `installed-plugins/`
