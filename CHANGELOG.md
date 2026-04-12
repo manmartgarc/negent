@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/manmartgarc/negent/compare/v0.3.3...v0.3.4) (2026-04-12)
+
+
+### Features
+
+* **plugin:** add Copilot CLI plugin support ([a9eeecf](https://github.com/manmartgarc/negent/commit/a9eeecf0295e47d6a53189a69493c6ec280bf11b))
+
 ## [0.3.3](https://github.com/manmartgarc/negent/compare/v0.3.2...v0.3.3) (2026-04-12)
 
 
