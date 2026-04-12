@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/manmartgarc/negent/compare/v0.3.4...v0.3.5) (2026-04-12)
+
+
+### Bug Fixes
+
+* **plugin:** use explicit Copilot hook launchers ([f12c284](https://github.com/manmartgarc/negent/commit/f12c284d9fb2bae42c7acadcabc853b04e5792b6))
+
 ## [0.3.4](https://github.com/manmartgarc/negent/compare/v0.3.3...v0.3.4) (2026-04-12)
 
 
