@@ -51,6 +51,14 @@ go vet ./...
 
 The pre-commit hook updates and stages `README.md` command table entries automatically.
 
+### End-to-end test coverage
+
+`go test ./...` also runs the `e2e/` package. Those tests cover full CLI workflows such as `init`, `push`, `pull`, dry-run/status/diff previews, and conflict resolution against a real bare Git remote.
+
+The harness gives each test isolated fake machines by creating separate `HOME`, `XDG_CONFIG_HOME`, and `XDG_DATA_HOME` trees (plus `COPILOT_HOME` when needed), then seeding agent files inside those directories. That lets the suite verify cross-machine sync behavior, staging repo state, and on-disk results without touching a contributor's real dotfiles.
+
+The suite builds the `negent` binary once and shells out to it instead of calling Cobra commands in-process. This keeps the tests aligned with the real executable path that users and CI run, including flag parsing, environment handling, process setup, and stdout/stderr behavior.
+
 ## Releases
 
 Releases are automated via [release-please](https://github.com/googleapis/release-please) — do **not** manually edit `CHANGELOG.md`.
