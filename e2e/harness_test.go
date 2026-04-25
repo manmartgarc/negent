@@ -28,11 +28,6 @@ type Machine struct {
 	CopilotHome string
 }
 
-type RunOptions struct {
-	Dir string
-	Env map[string]string
-}
-
 type CommandResult struct {
 	Stdout string
 	Stderr string
@@ -184,20 +179,11 @@ func newBareRemote(t *testing.T) string {
 	return remotePath
 }
 
-func runNegent(t *testing.T, machine *Machine, opts RunOptions, args ...string) CommandResult {
+func runNegent(t *testing.T, machine *Machine, args ...string) CommandResult {
 	t.Helper()
 
 	env := machine.envMap()
-	for key, value := range opts.Env {
-		env[key] = value
-	}
-
-	dir := opts.Dir
-	if dir == "" {
-		dir = testHarness.repoRoot
-	}
-
-	return runCommand(dir, env, testHarness.binaryPath, args...)
+	return runCommand(testHarness.repoRoot, env, testHarness.binaryPath, args...)
 }
 
 func runCommand(dir string, env map[string]string, name string, args ...string) CommandResult {
@@ -264,7 +250,9 @@ func newTestDir(t *testing.T, prefix string) string {
 		t.Fatalf("creating test dir: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = os.RemoveAll(dir)
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("remove %s: %v", dir, err)
+		}
 	})
 	return dir
 }

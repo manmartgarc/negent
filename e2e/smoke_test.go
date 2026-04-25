@@ -12,7 +12,7 @@ func TestInitAndPushWithHarness(t *testing.T) {
 	machine := newMachine(t, "machine-a")
 	machine.SeedAgentFile(t, "claude", "CLAUDE.md", "# machine-a\n")
 
-	initResult := runNegent(t, machine, RunOptions{}, "init",
+	initResult := runNegent(t, machine, "init",
 		"--non-interactive",
 		"--backend", "git",
 		"--repo", remote,
@@ -33,7 +33,7 @@ func TestInitAndPushWithHarness(t *testing.T) {
 		t.Fatalf("staging repo not created: %v", err)
 	}
 
-	pushResult := runNegent(t, machine, RunOptions{}, "push", "--quiet")
+	pushResult := runNegent(t, machine, "push", "--quiet")
 	if pushResult.Err != nil {
 		t.Fatalf("negent push: %v\nstdout:\n%s\nstderr:\n%s", pushResult.Err, pushResult.Stdout, pushResult.Stderr)
 	}

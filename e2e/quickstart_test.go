@@ -21,7 +21,7 @@ func TestQuickstartHappyPath(t *testing.T) {
 	machineA.SeedAgentFile(t, "claude", "CLAUDE.md", claudeContents)
 	machineA.SeedAgentFile(t, "claude", "commands/review.md", commandContents)
 
-	requireCommandSuccess(t, "machine A init", runNegent(t, machineA, RunOptions{}, "init",
+	requireCommandSuccess(t, "machine A init", runNegent(t, machineA, "init",
 		"--non-interactive",
 		"--backend", "git",
 		"--repo", remote,
@@ -31,7 +31,7 @@ func TestQuickstartHappyPath(t *testing.T) {
 	assertConfigForMachine(t, machineA, remote)
 	assertStagingRepoExists(t, machineA)
 
-	requireCommandSuccess(t, "machine A push", runNegent(t, machineA, RunOptions{}, "push", "--quiet"))
+	requireCommandSuccess(t, "machine A push", runNegent(t, machineA, "push", "--quiet"))
 
 	remoteFiles := gitOutput(t, testHarness.repoRoot, "--git-dir", remote, "ls-tree", "-r", "--name-only", "HEAD")
 	requireContains(t, remoteFiles, "claude/CLAUDE.md")
@@ -39,7 +39,7 @@ func TestQuickstartHappyPath(t *testing.T) {
 	requireFileContents(t, filepath.Join(machineA.StagingDir(), "claude", "CLAUDE.md"), claudeContents)
 	requireFileContents(t, filepath.Join(machineA.StagingDir(), "claude", "commands", "review.md"), commandContents)
 
-	requireCommandSuccess(t, "machine B init", runNegent(t, machineB, RunOptions{}, "init",
+	requireCommandSuccess(t, "machine B init", runNegent(t, machineB, "init",
 		"--non-interactive",
 		"--backend", "git",
 		"--repo", remote,
@@ -49,7 +49,7 @@ func TestQuickstartHappyPath(t *testing.T) {
 	assertConfigForMachine(t, machineB, remote)
 	assertStagingRepoExists(t, machineB)
 
-	requireCommandSuccess(t, "machine B pull", runNegent(t, machineB, RunOptions{}, "pull", "--quiet"))
+	requireCommandSuccess(t, "machine B pull", runNegent(t, machineB, "pull", "--quiet"))
 
 	requireFileContents(t, filepath.Join(machineB.AgentHome("claude"), "CLAUDE.md"), claudeContents)
 	requireFileContents(t, filepath.Join(machineB.AgentHome("claude"), "commands", "review.md"), commandContents)
@@ -64,28 +64,28 @@ func TestPreviewStatusAndDiff(t *testing.T) {
 
 	machineA.SeedAgentFile(t, "claude", "CLAUDE.md", "# Base instructions\n")
 
-	requireCommandSuccess(t, "machine A init", runNegent(t, machineA, RunOptions{}, "init",
+	requireCommandSuccess(t, "machine A init", runNegent(t, machineA, "init",
 		"--non-interactive",
 		"--backend", "git",
 		"--repo", remote,
 		"--machine", machineA.Name,
 		"--agent", "claude",
 	))
-	requireCommandSuccess(t, "machine A initial push", runNegent(t, machineA, RunOptions{}, "push", "--quiet"))
+	requireCommandSuccess(t, "machine A initial push", runNegent(t, machineA, "push", "--quiet"))
 
-	requireCommandSuccess(t, "machine B init", runNegent(t, machineB, RunOptions{}, "init",
+	requireCommandSuccess(t, "machine B init", runNegent(t, machineB, "init",
 		"--non-interactive",
 		"--backend", "git",
 		"--repo", remote,
 		"--machine", machineB.Name,
 		"--agent", "claude",
 	))
-	requireCommandSuccess(t, "machine B initial pull", runNegent(t, machineB, RunOptions{}, "pull", "--quiet"))
+	requireCommandSuccess(t, "machine B initial pull", runNegent(t, machineB, "pull", "--quiet"))
 
 	localOnlyPath := filepath.Join(machineB.AgentHome("claude"), "commands", "local.md")
 	writeFile(t, localOnlyPath, "Local preview only.\n")
 
-	pushPreview := runNegent(t, machineB, RunOptions{}, "push", "--dry-run")
+	pushPreview := runNegent(t, machineB, "push", "--dry-run")
 	requireCommandSuccess(t, "push --dry-run", pushPreview)
 	requireContains(t, pushPreview.Stdout, "Pending sync changes:")
 	requireContains(t, pushPreview.Stdout, "Push preview:")
@@ -99,14 +99,14 @@ func TestPreviewStatusAndDiff(t *testing.T) {
 	}
 
 	machineA.SeedAgentFile(t, "claude", "rules/remote.md", "Remote preview only.\n")
-	requireCommandSuccess(t, "machine A second push", runNegent(t, machineA, RunOptions{}, "push", "--quiet"))
+	requireCommandSuccess(t, "machine A second push", runNegent(t, machineA, "push", "--quiet"))
 
 	commitCountAfterRemotePush := gitOutput(t, testHarness.repoRoot, "--git-dir", remote, "rev-list", "--count", "--all")
 	if commitCountAfterRemotePush != "2" {
 		t.Fatalf("remote commit count after second push = %q, want 2", commitCountAfterRemotePush)
 	}
 
-	pullPreview := runNegent(t, machineB, RunOptions{}, "pull", "--dry-run")
+	pullPreview := runNegent(t, machineB, "pull", "--dry-run")
 	requireCommandSuccess(t, "pull --dry-run", pullPreview)
 	requireContains(t, pullPreview.Stdout, "Pending sync changes:")
 	requireContains(t, pullPreview.Stdout, "Pull preview:")
@@ -115,13 +115,13 @@ func TestPreviewStatusAndDiff(t *testing.T) {
 	requireNoFile(t, filepath.Join(machineB.AgentHome("claude"), "rules", "remote.md"))
 	requireNoFile(t, filepath.Join(machineB.StagingDir(), "claude", "rules", "remote.md"))
 
-	statusResult := runNegent(t, machineB, RunOptions{}, "status")
+	statusResult := runNegent(t, machineB, "status")
 	requireCommandSuccess(t, "status", statusResult)
 	requireContains(t, statusResult.Stdout, "Pending sync changes:")
 	requireContains(t, statusResult.Stdout, "local upload")
 	requireContains(t, statusResult.Stdout, "remote download")
 
-	diffResult := runNegent(t, machineB, RunOptions{}, "diff")
+	diffResult := runNegent(t, machineB, "diff")
 	requireCommandSuccess(t, "diff", diffResult)
 	requireContains(t, diffResult.Stdout, "Local changes (push):")
 	requireContains(t, diffResult.Stdout, "claude:commands/local.md")

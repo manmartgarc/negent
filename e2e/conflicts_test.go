@@ -22,23 +22,23 @@ func TestPullConflictListAndKeepRemote(t *testing.T) {
 
 	writeFile(t, filepath.Join(machineA.AgentHome("claude"), relPath), baseline)
 
-	runOK(t, "machine A init", runNegent(t, machineA, RunOptions{}, "init",
+	runOK(t, "machine A init", runNegent(t, machineA, "init",
 		"--non-interactive",
 		"--backend", "git",
 		"--repo", remote,
 		"--machine", machineA.Name,
 		"--agent", "claude",
 	))
-	runOK(t, "machine A push baseline", runNegent(t, machineA, RunOptions{}, "push", "--quiet"))
+	runOK(t, "machine A push baseline", runNegent(t, machineA, "push", "--quiet"))
 
-	runOK(t, "machine B init", runNegent(t, machineB, RunOptions{}, "init",
+	runOK(t, "machine B init", runNegent(t, machineB, "init",
 		"--non-interactive",
 		"--backend", "git",
 		"--repo", remote,
 		"--machine", machineB.Name,
 		"--agent", "claude",
 	))
-	runOK(t, "machine B pull baseline", runNegent(t, machineB, RunOptions{}, "pull", "--quiet"))
+	runOK(t, "machine B pull baseline", runNegent(t, machineB, "pull", "--quiet"))
 
 	localFile := filepath.Join(machineB.AgentHome("claude"), relPath)
 	if got := readFile(t, localFile); got != baseline {
@@ -47,9 +47,9 @@ func TestPullConflictListAndKeepRemote(t *testing.T) {
 
 	writeFile(t, localFile, localChange)
 	writeFile(t, filepath.Join(machineA.AgentHome("claude"), relPath), remoteChange)
-	runOK(t, "machine A push remote change", runNegent(t, machineA, RunOptions{}, "push", "--quiet"))
+	runOK(t, "machine A push remote change", runNegent(t, machineA, "push", "--quiet"))
 
-	pullResult := runNegent(t, machineB, RunOptions{}, "pull")
+	pullResult := runNegent(t, machineB, "pull")
 	runOK(t, "machine B pull conflict", pullResult)
 	assertContains(t, pullResult.Stdout,
 		"✓ Pull complete",
@@ -61,18 +61,18 @@ func TestPullConflictListAndKeepRemote(t *testing.T) {
 		t.Fatalf("machine B file after conflicting pull = %q, want local edit %q", got, localChange)
 	}
 
-	listResult := runNegent(t, machineB, RunOptions{}, "conflicts", "--list")
+	listResult := runNegent(t, machineB, "conflicts", "--list")
 	runOK(t, "machine B list conflicts", listResult)
 	assertContains(t, listResult.Stdout, "CONFLICT "+conflictLabel)
 
-	resolveResult := runNegent(t, machineB, RunOptions{}, "conflicts", "--keep-remote")
+	resolveResult := runNegent(t, machineB, "conflicts", "--keep-remote")
 	runOK(t, "machine B keep remote", resolveResult)
 	assertContains(t, resolveResult.Stdout, "took remote: "+conflictLabel)
 	if got := readFile(t, localFile); got != remoteChange {
 		t.Fatalf("machine B file after keep-remote = %q, want remote edit %q", got, remoteChange)
 	}
 
-	postListResult := runNegent(t, machineB, RunOptions{}, "conflicts", "--list")
+	postListResult := runNegent(t, machineB, "conflicts", "--list")
 	runOK(t, "machine B list conflicts after resolution", postListResult)
 	assertContains(t, postListResult.Stdout, "No conflicts.")
 }
